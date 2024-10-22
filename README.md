@@ -3,7 +3,9 @@
 <img src="https://raw.githubusercontent.com/mitsuba-renderer/mitsuba-data/master/docs/images/banners/banner_01.jpg"
 alt="Mitsuba banner">
 
-# Mitsuba Renderer 3
+# Mitsuba Renderer 3 - Unofficial AMVPT Plugin
+
+## Official sources:
 
 | Documentation  | Tutorial videos  | Linux             | MacOS             | Windows           |       PyPI        |
 |      :---:     |      :---:       |       :---:       |       :---:       |       :---:       |       :---:       |
