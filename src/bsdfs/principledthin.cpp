@@ -708,6 +708,10 @@ public:
                                       Mask active) const override {
         return m_base_color->eval(si, active);
     }
+    
+    Float eval_rougness(const SurfaceInteraction3f& si, Mask active) const override{
+        return m_roughness->eval_1(si, active);
+    }
 
     std::string to_string() const override {
         std::ostringstream oss;

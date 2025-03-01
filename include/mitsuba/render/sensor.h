@@ -89,6 +89,31 @@ public:
     std::pair<Wavelength, Spectrum>
     sample_wavelengths(const SurfaceInteraction3f &si, Float sample,
                        Mask active = true) const override;
+    
+    /**
+     * \brief Computes 'sample_direction' but with correct pdf (not importance) with
+     * respect to the sampled camera direction + additional "semi-jacobian" term, that
+     * can later be used in jacobian determinant computation between multiple views
+     * J = J1 / J2
+     * For now it only suits the pinhole and thinlens camera models, however can be
+     * modified to account for more complicated models in the future.
+     * 
+     * \param ref
+     *    A reference position somewhere within the scene.
+     *
+     * \param sample
+     *    A uniformly distributed 2D point on the domain <tt>[0,1]^2</tt>.
+     *
+     * \param idx
+     *    Corresponding camera indices (optional).
+     *
+     * \return
+     *    A \ref DirectionSample instance describing the generated sample
+     *    along with a jacobian term, surface orientation and active mask.
+     */
+
+    virtual std::tuple<DirectionSample3f, Float, Bool, Mask>
+    sample_surface(const Interaction3f &it, const Point2f &sample, const UInt32& idx, Mask active) const;
 
     //! @}
     // =============================================================
@@ -96,6 +121,9 @@ public:
     // =============================================================
     //! @{ \name Additional query functions
     // =============================================================
+
+    /// Returns whether the sensor contains subsensors
+    virtual bool has_subsensors() const {return false;}
 
     /// Return the time value of the shutter opening event
     ScalarFloat shutter_open() const { return m_shutter_open; }
@@ -216,7 +244,70 @@ protected:
     ScalarFloat m_near_clip;
     ScalarFloat m_far_clip;
     Float m_focus_distance;
+    Float m_lens_shift;
 };
+
+//! @}
+// -----------------------------------------------------------------------
+
+/**
+ * \brief Multiple sensor interface
+ *
+ * This class provides an abstract interface to several types of sensors that
+ * are consisting of multiple subsensors rendering from different viewpoints.
+ * 
+ *
+ * The interface is meant to be implemented by any kind of sensor, that contains
+ * multiple sub-sensors, as it provides collection of methods to interface with
+ * the internal sub-sensor collection.
+ *
+ * \ingroup librender
+ */
+ template <typename Float, typename Spectrum>
+ class MI_EXPORT_LIB MultiSensor : public Sensor<Float, Spectrum> {
+ public:
+     MI_IMPORT_BASE(Sensor)
+     MI_IMPORT_TYPES(SensorPtr)
+ 
+     virtual ~MultiSensor(){}
+ 
+     void traverse(TraversalCallback *callback) override { Base::traverse(callback);}
+     
+     /// Returns all number of Sensor instances associated with this sensor
+     virtual uint32_t n_sensors() const {NotImplementedError("n_sensors");}
+     /// Returns the dimensions of stored sensor grid (if any)
+     virtual ScalarVector2u grid_dim() const {NotImplementedError("grid_dim");}
+     /// Returns whether the display axis are reversed
+     virtual std::pair<bool, bool> reverse_axis() const {NotImplementedError("reverse_axis");}
+     /// Samples a ray with camera indices 
+     virtual std::tuple<Ray3f, Spectrum, UInt32>
+     sample_ray_idx(Float time, Float sample1, const Point2f &sample2, 
+     const Point2f &sample3, Mask active = true) const{
+         DRJIT_MARK_USED(time);
+         DRJIT_MARK_USED(sample1);
+         DRJIT_MARK_USED(sample2);
+         DRJIT_MARK_USED(sample3);
+         DRJIT_MARK_USED(active);
+         NotImplementedError("sample_ray_idx");
+     }
+     // Has subsensors flag
+     bool has_subsensors() const override{return true;}
+     /// Returns all \ref Sensor instances associated with this sensor
+     virtual std::vector<Sensor<Float, Spectrum> *> sensors(){NotImplementedError("sensors");}
+     /// Returns all \ref Sensor instances associated with this sensor
+     virtual std::vector<const Sensor<Float, Spectrum> *> sensors()const{NotImplementedError("sensors");}
+     /// Gathers sensors acording to passed in idx
+     virtual SensorPtr gather(const UInt32 &idx, Mask active)const{
+         DRJIT_MARK_USED(idx);
+         DRJIT_MARK_USED(active);
+         NotImplementedError("gather");
+     }
+ 
+     MI_DECLARE_CLASS()
+ 
+ protected:
+     MultiSensor(const Properties &props) : Base(props) {}
+ };
 
 // ========================================================================
 //! @{ \name Functionality common to perspective cameras, projectors, etc.
@@ -307,6 +398,7 @@ orthographic_projection(const Vector<int, 2> &film_size,
 
 MI_EXTERN_CLASS(Sensor)
 MI_EXTERN_CLASS(ProjectiveCamera)
+MI_EXTERN_CLASS(MultiSensor)
 NAMESPACE_END(mitsuba)
 
 // -----------------------------------------------------------------------
@@ -317,6 +409,7 @@ MI_CALL_TEMPLATE_BEGIN(Sensor)
     DRJIT_CALL_METHOD(sample_ray)
     DRJIT_CALL_METHOD(sample_ray_differential)
     DRJIT_CALL_METHOD(sample_direction)
+    DRJIT_CALL_METHOD(sample_surface)
     DRJIT_CALL_METHOD(pdf_direction)
     DRJIT_CALL_METHOD(eval_direction)
     DRJIT_CALL_METHOD(sample_position)
