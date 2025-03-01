@@ -454,6 +454,11 @@ public:
 #endif // MI_SAMPLE_DIFFUSE
     }
 
+    // Average for now
+    Float eval_rougness(const SurfaceInteraction3f&, Mask active) const override{
+        return dr::select(active, 0.5f, 0.f);
+    }
+
     std::string to_string() const override {
         std::ostringstream oss;
         oss << "Measured[" << std::endl

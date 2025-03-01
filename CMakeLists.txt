@@ -114,7 +114,7 @@ endif()
 # ----------------------------------------------------------
 
 if (NOT EXISTS ${CMAKE_CURRENT_BINARY_DIR}/mitsuba.conf)
-  set(MI_DEFAULT_VARIANTS "scalar_rgb,scalar_spectral,cuda_ad_rgb,llvm_ad_rgb,llvm_ad_spectral" CACHE STRING "Default Mitsuba variants that should be included if no mitsuba.conf file exists")
+  set(MI_DEFAULT_VARIANTS "scalar_rgb,cuda_rgb,llvm_rgb,llvm_ad_spectral" CACHE STRING "Default Mitsuba variants that should be included if no mitsuba.conf file exists")
   string(REPLACE "," ";" MI_DEFAULT_VARIANTS "${MI_DEFAULT_VARIANTS}")
   message(STATUS "MI_DEFAULT_VARIANTS: ${MI_DEFAULT_VARIANTS}")
   mark_as_advanced(MI_DEFAULT_VARIANTS)

@@ -212,7 +212,9 @@ public:
                                       Mask active) const override {
         return m_nested_bsdf->eval_diffuse_reflectance(si, active);
     }
-
+    Float eval_rougness(const SurfaceInteraction3f& si, Mask active) const override{
+        return m_nested_bsdf->eval_rougness(si, active);
+    }
     std::string to_string() const override {
         std::ostringstream oss;
         oss << "NormalMap[" << std::endl

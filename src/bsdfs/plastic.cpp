@@ -90,7 +90,7 @@ sRGB:
 Internal scattering
 *******************
 
-Internally, tis model simulates the interaction of light with a diffuse
+Internally, this model simulates the interaction of light with a diffuse
 base surface coated by a thin dielectric layer. This is a convenient
 abstraction rather than a restriction. In other words, there are many
 materials that can be rendered with this model, even if they might not
@@ -362,6 +362,23 @@ public:
     Spectrum eval_diffuse_reflectance(const SurfaceInteraction3f &si,
                                       Mask active) const override {
         return m_diffuse_reflectance->eval(si, active);
+    }
+
+    Float eval_rougness(const SurfaceInteraction3f&, Mask active) const override{
+        // Dirty approximation - integrator should discard specular samples anyways 
+        return Float(active);
+        /*
+        Float cos_theta_i = Frame3f::cos_theta(si.wi);
+        active &= cos_theta_i > 0.f;
+
+        UnpolarizedSpectrum result(0.f);
+        Float f_i           = std::get<0>(fresnel(cos_theta_i, Float(m_eta))),
+              prob_specular = f_i * m_specular_sampling_weight,
+              prob_diffuse  = (1.f - f_i) * (1.f - m_specular_sampling_weight);
+        prob_specular = prob_specular / (prob_specular + prob_diffuse);
+
+        prob_diffuse = 1.f - prob_specular;
+        return dr::clip(prob_diffuse, 0.f, 1.f);*/
     }
 
     std::string to_string() const override {

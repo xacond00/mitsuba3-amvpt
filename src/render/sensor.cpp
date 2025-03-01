@@ -4,6 +4,7 @@
 #include <mitsuba/core/logger.h>
 #include <mitsuba/render/film.h>
 #include <mitsuba/render/sampler.h>
+#include <mitsuba/render/wrap.h>
 
 NAMESPACE_BEGIN(mitsuba)
 
@@ -12,6 +13,8 @@ NAMESPACE_BEGIN(mitsuba)
 // =============================================================================
 
 MI_VARIANT Sensor<Float, Spectrum>::Sensor(const Properties &props) : Base(props) {
+    using Wrap   = Wrap<Float, Spectrum>;
+    
     m_shutter_open      = props.get<ScalarFloat>("shutter_open", 0.f);
     m_shutter_open_time = props.get<ScalarFloat>("shutter_close", 0.f) - m_shutter_open;
 
@@ -22,6 +25,7 @@ MI_VARIANT Sensor<Float, Spectrum>::Sensor(const Properties &props) : Base(props
     for (auto &[name, obj] : props.objects(false)) {
         auto *film = dynamic_cast<Film *>(obj.get());
         auto *sampler = dynamic_cast<Sampler *>(obj.get());
+        Wrap *wrap(dynamic_cast<Wrap *>(obj.get()));
 
         if (film) {
             if (m_film)
@@ -32,6 +36,18 @@ MI_VARIANT Sensor<Float, Spectrum>::Sensor(const Properties &props) : Base(props
             if (m_sampler)
                 Throw("Only one sampler can be specified per sensor.");
             m_sampler = sampler;
+            props.mark_queried(name);
+        }else if(wrap){
+            if (wrap->wrap_class() == "film") {
+                if (m_film)
+                    Throw("Only one film can be specified per sensor.");
+                m_film = dynamic_cast<Film *>(wrap->create_instance().get());
+            }
+            else if (wrap->wrap_class() == "sampler") {
+                if (m_sampler)
+                    Throw("Only one sampler can be specified per sensor.");
+                m_sampler = dynamic_cast<Sampler *>(wrap->create_instance().get());
+            }
             props.mark_queried(name);
         }
     }
@@ -125,6 +141,12 @@ Sensor<Float, Spectrum>::sample_wavelengths(const SurfaceInteraction3f& /*si*/, 
     return sample_wavelength<Float, Spectrum>(sample);
 }
 
+MI_VARIANT std::tuple<typename Sensor<Float, Spectrum>::DirectionSample3f, 
+Float, typename Sensor<Float, Spectrum>::Bool, typename Sensor<Float, Spectrum>::Mask> 
+Sensor<Float, Spectrum>::sample_surface(const Interaction3f &, const Point2f &, const UInt32&, Mask) const {
+    NotImplementedError("sample_surface");
+}
+
 // =============================================================================
 // ProjectiveCamera interface
 // =============================================================================
@@ -137,6 +159,7 @@ MI_VARIANT ProjectiveCamera<Float, Spectrum>::ProjectiveCamera(const Properties 
     m_far_clip = props.get<ScalarFloat>("far_clip", 1e4f);
     /* Distance to the focal plane */
     m_focus_distance = props.get<ScalarFloat>("focus_distance", (float) m_far_clip);
+    m_lens_shift = props.get<ScalarFloat>("lens_shift", 0.f);
 
     if (m_near_clip <= 0.f)
         Throw("The 'near_clip' parameter must be greater than zero!");
@@ -209,7 +232,10 @@ double parse_fov(const Properties &props, double aspect) {
 
 MI_IMPLEMENT_CLASS_VARIANT(Sensor, Endpoint, "sensor")
 MI_IMPLEMENT_CLASS_VARIANT(ProjectiveCamera, Sensor)
+MI_IMPLEMENT_CLASS_VARIANT(MultiSensor, Sensor)
 
 MI_INSTANTIATE_CLASS(Sensor)
 MI_INSTANTIATE_CLASS(ProjectiveCamera)
+MI_INSTANTIATE_CLASS(MultiSensor)
+
 NAMESPACE_END(mitsuba)

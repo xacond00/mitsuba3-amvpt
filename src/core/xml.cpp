@@ -76,6 +76,10 @@ inline std::string class_key(const std::string &name, const std::string &variant
     return name + "." + variant;
 }
 
+const Class *find_class(const std::string &name, const std::string &variant){
+    return tag_class->at(class_key(name, variant));
+}
+
 // Called by Class::Class()
 void register_class(const Class *class_) {
     Assert(class_ != nullptr);

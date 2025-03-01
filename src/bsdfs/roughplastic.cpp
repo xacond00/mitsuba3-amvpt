@@ -505,6 +505,10 @@ public:
         return m_diffuse_reflectance->eval(si, active);
     }
 
+    Float eval_rougness(const SurfaceInteraction3f&, Mask active) const override{
+        return dr::select(active, m_alpha, 0.f);
+    }
+
     std::string to_string() const override {
         std::ostringstream oss;
         oss << "RoughPlastic[" << std::endl

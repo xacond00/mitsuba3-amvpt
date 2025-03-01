@@ -5,7 +5,8 @@
 # VS & VSCode
 /.vscode
 /.vs
-
+/.cache
+/.github
 # Jupyter
 /.ipynb_checkpoints
 
@@ -28,3 +29,4 @@ __pycache__
 /docs/src/quickstart
 /docs/src/generated
 /docs/resources
+/scenes

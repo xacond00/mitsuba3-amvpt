@@ -174,7 +174,11 @@ public:
         m_camera_to_sample = perspective_projection(
             m_film->size(), m_film->crop_size(), m_film->crop_offset(),
             m_x_fov, Float(m_near_clip), Float(m_far_clip));
-
+        
+        // Lens shift part
+        m_camera_to_sample.matrix.entry(0, 2) += Base::m_lens_shift;
+        m_camera_to_sample.inverse_transpose = dr::inverse_transpose(m_camera_to_sample.matrix);
+        
         m_sample_to_camera = m_camera_to_sample.inverse();
 
         // Position differentials on the near plane
@@ -318,6 +322,66 @@ public:
         ds.pdf  = dr::select(active, Float(1.f), Float(0.f));
 
         return { ds, Spectrum(importance(local_d) * inv_dist * inv_dist) };
+    }
+
+    std::tuple<DirectionSample3f, Float, Bool, Mask>
+    sample_surface(const Interaction3f &it, const Point2f &, const UInt32&,
+                   Mask active) const override {
+        Transform4f trafo = m_to_world.value();
+        Point3f ref_p     = trafo.inverse().transform_affine(it.p);
+
+        // Check if it is outside of the clip range
+        DirectionSample3f ds = dr::zeros<DirectionSample3f>();
+
+        ds.pdf = 0.f;
+        active &= (ref_p.z() >= m_near_clip) && (ref_p.z() <= m_far_clip);
+        if (dr::none_or<false>(active))
+            return { ds, 0.f, active, active };
+
+        Vector2f scaled_principal_point_offset =
+            m_film->size() * m_principal_point_offset / m_film->crop_size();
+
+        Point3f screen_sample = m_camera_to_sample * ref_p;
+        ds.uv = Point2f(screen_sample.x() - scaled_principal_point_offset.x(),
+                        screen_sample.y() - scaled_principal_point_offset.y());
+        active &= (ds.uv.x() >= 0) && (ds.uv.x() <= 1) && (ds.uv.y() >= 0) &&
+                  (ds.uv.y() <= 1);
+        if (dr::none_or<false>(active))
+            return { ds, 0.f, active, active };
+
+        ds.uv *= m_resolution;
+        Vector3f local_d(ref_p);
+        Float dist     = dr::norm(local_d);
+        Float inv_dist = dr::rcp(dist);
+        // Cos(theta_film)
+        Float ctf = Frame3f::cos_theta(local_d);
+        active &= ctf > 0.f;
+        if (dr::none_or<false>(active))
+            return { ds, 0.f, active, active };
+        Float ictf  = dr::rcp(ctf);
+        Float ictf3 = ictf * ictf * ictf;
+        // Film pdf = 1 / (A_film * ctf^3)
+        // Film distance is always normalized to 1 in Mitsuba
+        // Thanks for the help: njroussel
+        Float pdf_film = m_normalization * ictf3;
+
+        local_d *= inv_dist;
+        ds.pdf  = pdf_film;
+        ds.p    = trafo.transform_affine(Point3f(0.0f));
+        ds.d    = (ds.p - it.p) * inv_dist;
+        ds.dist = dist;
+        ds.n    = trafo * Vector3f(0.0f, 0.0f, 1.0f);
+        // Cos(theta_surf)
+        Float cts = dr::dot(ds.d, it.n);
+        // Determine the surface orientation, used later
+        Bool face = cts > 0.f;
+        cts       = dr::abs(cts);
+        // Jacobian = cts / ds^2 * df^2 / ctf
+        // Float film_d = dr::squared_norm((ref_p * inv_dist));
+        // Float Jp = dr::square(film_d * inv_dist) * (cts * ictf);
+        // Jacobian term = cts / p_dist^2 * (1 / ctf^3)
+        Float Jp = (cts * inv_dist * inv_dist) * ds.pdf; // ictf3;
+        return { ds, Jp, face, active };
     }
 
     ScalarBoundingBox3f bbox() const override {
