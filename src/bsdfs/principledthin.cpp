@@ -709,7 +709,7 @@ public:
         return m_base_color->eval(si, active);
     }
     
-    Float eval_rougness(const SurfaceInteraction3f& si, Mask active) const override{
+    Float eval_roughness(const SurfaceInteraction3f& si, Mask active) const override{
         return m_roughness->eval_1(si, active);
     }
 

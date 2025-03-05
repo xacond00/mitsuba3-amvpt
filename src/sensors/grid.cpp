@@ -128,7 +128,9 @@ public:
             m_cam_dir  = ScalarVector3f(1, 0, 0);
             m_cam_dist = 0.1f;
         }
-
+        m_cam_off = props.get<ScalarVector3f>("cam_off", ScalarVector3f(0,0,0));
+        m_cam_off.y() = -m_cam_off.y();
+        m_cam_off.z() = -m_cam_off.z();
         /*Load wrappers*/
         using Wrap_t   = Wrap<Float, Spectrum>;
         Wrap_t *w_sens = nullptr;
@@ -166,7 +168,7 @@ public:
         double fov_x = parse_fov((props.has_property("fov") ? props : sub_props), sub_asp);
         m_foc_dist = sub_props.get<float>("focus_distance", 1);
         m_foc_dist = props.get<float>("focus_distance", m_foc_dist);
-        ScalarFloat fov = dr::tan(dr::deg_to_rad(fov_x) * 0.5) / sub_asp;
+        //ScalarFloat fov = dr::tan(dr::deg_to_rad(fov_x) * 0.5) / sub_asp;
         
         // Override default parameters
         sub_props.remove_property("focal_length");
@@ -184,7 +186,9 @@ public:
                 ScalarFloat offset = m_foc_dist * tan_off;
                 double shift = 0.5 * double(tan_off) / dr::tan(dr::deg_to_rad(fov_x) * 0.5);
                 auto itrafo = to_world.inverse_transpose;
-                itrafo.entry(3,0) += offset;
+                itrafo.entry(3,0) += offset + m_cam_off.x();
+                itrafo.entry(3,1) += m_cam_off.y();
+                itrafo.entry(3,2) += m_cam_off.z();
                 auto ntrafo = dr::inverse(dr::transpose(itrafo));
                 ScalarTransform4f trafo(ntrafo, itrafo);
                 //trafo.inverse_transpose = dr::inverse_transpose(trafo.matrix);
@@ -203,7 +207,7 @@ public:
         else {
             for (uint32_t i = 0; i < m_grid_size; ++i) {
                 ScalarFloat dt = i / ScalarFloat(m_grid_size - 1);
-                ScalarVector3f offset   = m_cam_dir * (m_cam_dist * (dt - 0.5f * m_cam_center));
+                ScalarVector3f offset   = m_cam_off + m_cam_dir * (m_cam_dist * (dt - 0.5f * m_cam_center));
                 auto itrafo = to_world.inverse_transpose;
                 itrafo.entry(3,0) += offset.x();
                 itrafo.entry(3,1) += offset.y();
@@ -457,6 +461,7 @@ private:
     std::vector<ref<Sensor_t>> m_sensors;
     DynamicBuffer<SensorPtr> m_sensors_dr;
     ScalarVector3f m_cam_dir;
+    ScalarVector3f m_cam_off;
     ScalarVector2u m_grid_dim;
     ScalarVector2u m_film_res;
     ScalarFloat m_cam_dist;

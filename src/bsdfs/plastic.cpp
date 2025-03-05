@@ -364,7 +364,7 @@ public:
         return m_diffuse_reflectance->eval(si, active);
     }
 
-    Float eval_rougness(const SurfaceInteraction3f&, Mask active) const override{
+    Float eval_roughness(const SurfaceInteraction3f&, Mask active) const override{
         // Dirty approximation - integrator should discard specular samples anyways 
         return Float(active);
         /*

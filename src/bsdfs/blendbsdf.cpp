@@ -223,10 +223,10 @@ public:
                m_nested_bsdf[1]->eval_diffuse_reflectance(si, active) * weight;
     }
     
-    Float eval_rougness(const SurfaceInteraction3f& si, Mask active) const override{
+    Float eval_roughness(const SurfaceInteraction3f& si, Mask active) const override{
         Float weight = eval_weight(si, active);
-        return m_nested_bsdf[0]->eval_rougness(si, active) * (1 - weight) +
-               m_nested_bsdf[1]->eval_rougness(si, active) * weight;
+        return m_nested_bsdf[0]->eval_roughness(si, active) * (1 - weight) +
+               m_nested_bsdf[1]->eval_roughness(si, active) * weight;
     }
 
     std::string to_string() const override {
