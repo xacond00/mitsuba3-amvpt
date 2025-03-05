@@ -505,7 +505,7 @@ public:
         return m_diffuse_reflectance->eval(si, active);
     }
 
-    Float eval_rougness(const SurfaceInteraction3f&, Mask active) const override{
+    Float eval_roughness(const SurfaceInteraction3f&, Mask active) const override{
         return dr::select(active, m_alpha, 0.f);
     }
 

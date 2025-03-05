@@ -589,11 +589,11 @@ public:
     virtual Spectrum eval_diffuse_reflectance(const SurfaceInteraction3f &si,
                                               Mask active = true) const;
     /**
-     * \brief Evaluate BSDF's rougness at a surface.
+     * \brief Evaluate BSDF's roughness at a surface.
      * Returns 1 for diffuse, 0 for specular and (0,1) for others.
      * For anisotropic materials returns vector length, normalized by sqrt(2).
     */
-    virtual Float eval_rougness(const SurfaceInteraction3f&, Mask)const{return 0.f;}
+    virtual Float eval_roughness(const SurfaceInteraction3f&, Mask)const{return 0.f;}
 
     /// Return a human-readable representation of the BSDF
     std::string to_string() const override = 0;
@@ -668,7 +668,7 @@ MI_CALL_TEMPLATE_BEGIN(BSDF)
     DRJIT_CALL_METHOD(eval_pdf)
     DRJIT_CALL_METHOD(eval_pdf_sample)
     DRJIT_CALL_METHOD(eval_diffuse_reflectance)
-    DRJIT_CALL_METHOD(eval_rougness)
+    DRJIT_CALL_METHOD(eval_roughness)
     DRJIT_CALL_METHOD(has_attribute)
     DRJIT_CALL_METHOD(eval_attribute)
     DRJIT_CALL_METHOD(eval_attribute_1)

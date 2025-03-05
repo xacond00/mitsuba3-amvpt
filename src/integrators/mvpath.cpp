@@ -163,7 +163,7 @@ MI_VARIANT typename MVPT::TensorXf MVPT::render(Scene *scene, Sensor *init_senso
         sampler->seed(seed, (uint32_t) wavefront_size);
 
         // Allocate a large image block that will receive the entire rendering
-        ref<ImageBlock> block = film->create_block(0, m_sa_reuse && 0);
+        ref<ImageBlock> block = film->create_block();
         block->set_offset(film->crop_offset());
 
         // Only use the ImageBlock coalescing feature when rendering enough samples
@@ -183,11 +183,11 @@ MI_VARIANT typename MVPT::TensorXf MVPT::render(Scene *scene, Sensor *init_senso
         Vector2i pos;
         pos.y() = idx / film_size[0];
         pos.x() = dr::fnmadd(film_size[0], pos.y(), idx);
-
         if (film->sample_border())
             pos -= film->rfilter()->border_size();
 
         pos += film->crop_offset();
+        //dr::make_opaque(pos);
 
         std::unique_ptr<SampleData[]> sampleData(new SampleData[n_sensors]);
         Timer timer;
@@ -197,9 +197,11 @@ MI_VARIANT typename MVPT::TensorXf MVPT::render(Scene *scene, Sensor *init_senso
             Sampler *sampler_i = sampler;
             // Optimization to greatly reduce memory usage
             if(independent){
+                UInt32 sampler_seed = (spp_per_pass * i + seed);
+                //dr::make_opaque(sampler_seed);
                 sampler_ref = sampler->fork();
                 sampler_i = sampler_ref.get();
-                sampler_i->seed(i + seed, wavefront_size);
+                sampler_i->seed(sampler_seed, wavefront_size);
             }
 
             if (m_sa_reuse) {
@@ -209,7 +211,7 @@ MI_VARIANT typename MVPT::TensorXf MVPT::render(Scene *scene, Sensor *init_senso
             }
             // Evaluate each pass
             if (n_passes > 1) {
-                if(!independent && i + 1 < n_passes){
+                if(!independent){
                     sampler_i->advance(); // Will trigger a kernel launch of size 1
                     sampler_i->schedule_state();
                 }

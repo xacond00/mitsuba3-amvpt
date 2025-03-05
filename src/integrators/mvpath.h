@@ -2,6 +2,7 @@
 /*---------------------------------------------------------------------------------------------*/
 /*Bc. Ondrej Ac, FIT VUT Brno, 2025*/
 /*---------------------------------------------------------------------------------------------*/
+#include "dr_macros.h"
 #include <cstdint>
 #include <drjit/morton.h>
 #include <mitsuba/core/fstream.h>
@@ -22,7 +23,6 @@
 #include <mitsuba/render/sensor.h>
 #include <mitsuba/render/spiral.h>
 #include <nanothread/nanothread.h>
-#include "dr_macros.h"
 NAMESPACE_BEGIN(mitsuba)
 
 /**!
@@ -81,8 +81,8 @@ Reusing parts of Mitsuba 3 stock source code (PathIntegrator,SamplingIntegrator)
 Based on: https://bfraboni.github.io/mvpt19/index.html.
 Author: Ondrej Ac (xacond00); VUT FIT, Czechia; @2024-2025.
 
-Note: Implementation split into multiple header files, as only single source file 
-can be associated with a plugin. Results in few ugly hacks to hide compiler warnings.  
+Note: Implementation split into multiple header files, as only single source file
+can be associated with a plugin. Results in few ugly hacks to hide compiler warnings.
 
 .. image::
 ../../resources/data/docs/images/integrator/integrator_path_figure.png :width:
@@ -123,7 +123,7 @@ public:
         m_sa_reuse     = props.get<bool>("sa_reuse", false);
         m_force_eval   = props.get<bool>("force_eval", true);
         m_sa_mis       = props.get<bool>("sa_mis", false);
-        m_debug       = props.get<bool>("debug", false);
+        m_debug        = props.get<bool>("debug", false);
         m_fast_mis     = props.get<bool>("fast_mis", false);
         m_spp_pass_lim = props.get<uint32_t>("spp_pass_lim", 16);
     }
@@ -142,24 +142,24 @@ public:
     };
 
     struct SampleData {
-        Spectrum result = dr::zeros<Spectrum>(); // First hit radiance
+        Spectrum result; // First hit radiance
         // Temporary bsdf reflectance (for direct and indirect radiance)
-        Spectrum bsdf_val = dr::zeros<Spectrum>();
-        Vector3f wi       = dr::zeros<Vector3f>(); // Incoming surface direction
-        Vector3f wo_r       = dr::zeros<Vector3f>(); // Reflected surface direction
-        Vector2f pos      = dr::zeros<Vector2f>(); // Raster position
-        Float weight      = dr::zeros<Float>();    // Final weight
-        Float pdfM        = dr::zeros<Float>();    // Precomputed material pdf
-        Float pdf         = dr::zeros<Float>();    // Pdf of this view
-        Float pdf_lk      = dr::zeros<Float>();    // Pdf from primary to this view
-        Float Jp          = dr::zeros<Float>();    // Partial Jacobian term
-        UInt32 idx        = dr::zeros<UInt32>();   // Sensor index
-        Mask indirect     = dr::zeros<Mask>();     // Sample indirect lighting ?
-        Mask valid        = dr::zeros<Mask>();     // Is visible, has same material ?
-        DRJIT_STRUCT(SampleData, result, bsdf_val, wi, wo_r, pos, weight, pdfM, pdf, pdf_lk, Jp, idx, indirect, valid);
+        Spectrum bsdf_val;
+        Vector3f wi;   // Incoming surface direction
+        Vector3f wo_r; // Reflected surface direction
+        Vector2f pos;  // Raster position
+        Float weight;  // Final weight
+        Float pdfM;    // Precomputed material pdf
+        Float pdf;     // Pdf of this view
+        Float pdf_lk;  // Pdf from primary to this view
+        Float Jp, iJp;      // Partial Jacobian term and its inverse
+        UInt32 idx;    // Sensor index
+        Mask indirect; // Sample indirect lighting ?
+        Mask valid;    // Is visible, has same material ?
+        DRJIT_STRUCT(SampleData, result, bsdf_val, wi, wo_r, pos, weight, pdfM, pdf, pdf_lk, Jp, iJp, idx, indirect, valid);
     };
 
-    struct BSDFData{
+    struct BSDFData {
         BSDFPtr bsdf;
         Float alpha, sqr_a, rsqrt_a;
         Bool diffuse, reuse;
@@ -211,87 +211,56 @@ public:
     }
 
     template <bool primary>
-    auto sensors_visible(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, const Vector2f &ap_sample,
+    auto sensors_visible(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, const Point2f &ap_sample, 
                          const SurfaceInteraction3f &si, Bool prim_face, const UInt32 &idx, const Mask &active) const {
         auto [sensor_ds, Jp, face, valid] = sensor->sample_surface(si, ap_sample, idx, active);
-        
+
         // If camera isn't primary, check geometric visibility too...
         if (!primary && dr::any_or<true>(valid)) {
             valid &= (face == prim_face) && Jp > 0.f;
             Ray3f sensor_ray = si.spawn_ray_to(sensor_ds.p);
-            
-            valid &= DR_IF(valid, (sensor_ray, scene), (
-                return !scene->ray_test(sensor_ray);
-            ), (
-                return Mask(false);
-            ));
+            valid &= !scene->ray_test(sensor_ray);
         }
         return std::tuple(sensor_ds, Jp, valid);
     }
     // Fast TV distance approximation based on plugging GGX formula into TV distance calculation
     // Very accurate if the BSDF has GGX distribution, less so for Beckmann, but not too terrible...
-    static Float tv_pdf_fast(const Vector3f &wo_l,  const Vector3f &wi_k, const Float &p_k, const BSDFData &bsdf, const Mask &active) {
-        auto p_l    = dr::square(Frame3f::cos_theta(dr::normalize(wi_k + wo_l)));
-        auto N = dr::fmadd(bsdf.sqr_a, dr::maximum(p_k, p_l), 1.f);
-        auto D = dr::fmadd(bsdf.sqr_a, dr::minimum(p_k, p_l), 1.f);
-        Float q   = dr::square(N * dr::rcp(D));
+    static Float tv_pdf_fast(const Vector3f &wo_l, const Vector3f &wi_k, const Float &p_k, const BSDFData &bsdf,
+                             const Mask &active) {
+        auto p_l = dr::square(Frame3f::cos_theta(dr::normalize(wi_k + wo_l)));
+        auto N   = dr::fmadd(bsdf.sqr_a, dr::maximum(p_k, p_l), 1.f);
+        auto D   = dr::fmadd(bsdf.sqr_a, dr::minimum(p_k, p_l), 1.f);
+        Float q  = dr::square(N * dr::rcp(D));
+        // Rational approximation to pow(p, 1/a)
         Float p = dr::fmadd(q - 1.f, bsdf.rsqrt_a, 1.f);
-        p = dr::square(dr::maximum(p, 0));
-        p = dr::lerp(p, q, bsdf.alpha);  
+        p       = dr::square(dr::maximum(p, 0));
+        p       = dr::lerp(p, q, bsdf.alpha);
         return dr::select(active, p, 0.f);
-        //dr::select(active, dr::pow(q, dr::rcp(a0)), 0);
-        //dr::select(active, dr::maximum(a0 * q, dr::fmadd(a2, q - 1.f, 1.f)), 0);
-        //dr::select(active, dr::lerp(dr::square(q), q, a0), 0);
     }
     // Compute total variation pdf of brdfs from L to K
     // Wo_l is reflection direction of primary camera (local)
     // Wi_k is incoming direction from secondary camera (local) in si_k
     // Pi_k is just precomputed pdf(wi_k, wo_k)
-    // Alpha is material rougness
-    static Float tv_pdf(const Vector3f &wo_l, const SurfaceInteraction3f &si_k, const Float &p_k, const BSDFData &bsdf, Mask active) {
+    // Alpha is material roughness
+    static Float tv_pdf(const Vector3f &wo_l, const SurfaceInteraction3f &si_k, const Float &p_k, const BSDFData &bsdf,
+                        Mask active) {
         active &= p_k > 0.f;
         if (dr::none_or<false>(active))
             return 0.f;
-        BSDFContext ctx(TransportMode::Radiance, (uint32_t)BSDFFlags::Glossy);
+        BSDFContext ctx(TransportMode::Radiance, (uint32_t) BSDFFlags::Glossy);
         Float p_l = bsdf.bsdf->pdf(ctx, si_k, wo_l, active);
         active &= p_l > 0.f;
         Float p_max = dr::maximum(p_l, p_k);
         Float p_min = dr::minimum(p_l, p_k);
-        // Intial pdf: q = 1 - TVD 
+        // Intial pdf: q = 1 - TVD
         Float q = p_min * dr::rcp(p_max);
         // Piecewise polynomial approximation of p ^ (1 / a)
         Float p = dr::fmadd(q - 1.f, bsdf.rsqrt_a, 1.f);
-        p = dr::square(dr::maximum(p, 0));
-        p = dr::lerp(p, q, bsdf.alpha);  
+        p       = dr::square(dr::maximum(p, 0));
+        p       = dr::lerp(p, q, bsdf.alpha);
         return dr::select(active, p, 0.f);
     }
 
-    // Implementation with conditional based on diffuse flag (faster)
-    /*
-    static Float tv_pdf_if(const Vector3f &wo_l, const SurfaceInteraction3f &si_k, const Float &p_k, const BSDFData &bsdf, Mask active) {
-        active &= p_k > 0.f;
-        if (dr::none_or<false>(active))
-            return 0.f;
-        auto alpha = bsdf.alpha;
-        Float p = dr::if_stmt(std::make_tuple(wo_l, si_k, p_k, bsdf, active), bsdf.diffuse || !active, 
-         [](const Vector3f &, const SurfaceInteraction3f &, const Float &, const Float &, const BSDFData&, Mask active){
-            return dr::select(active, Float(1.f), Float(0.f));
-            },
-        [](const Vector3f &wo_l, const SurfaceInteraction3f &si_k, const Float &p_k, const BSDFData& bsdf, Mask active){
-                BSDFContext ctx(TransportMode::Radiance, (uint32_t)BSDFFlags::Glossy);
-                Float p_l = bsdf.bsdf->pdf(ctx, si_k, wo_l, active);
-                active &= p_l > 0.f;
-                Float p_max = dr::maximum(p_l, p_k);
-                Float p_min = dr::minimum(p_l, p_k);
-                // Intial pdf: q = 1 - TVD 
-                Float q = p_min * dr::rcp(p_max);
-                Float p = dr::fmadd(q - 1.f, bsdf.rsqrt_a, 1.f);
-                p = dr::square(dr::maximum(p, 0));
-                p = dr::lerp(p, q, bsdf.alpha); 
-                return dr::select(active, p, 0.f);
-        });
-        return p;
-    }*/
     /// Compute a multiple importance sampling weight using the power heuristic
     static Float mis_weight(Float pdf_a, Float pdf_b) {
         pdf_a *= pdf_a;
@@ -310,57 +279,11 @@ public:
         else
             return dr::fmadd(a, b, c);
     }
-
-    /*
-    void mis_weights(SampleData *samples, uint n_sensors, SurfaceInteraction3f &si_k, const BSDFData &bsdf)const{
-        for (uint32_t k = 0; k < n_sensors; k++) {
-            // Sample k already contains the conditional propability
-            // nominator p(l->k)
-            auto &sample_k = samples[k];
-            // Skip invalid samples (for scalar variant)
-            if (dr::none_or<false>(sample_k.valid))
-                continue;
-            si_k.wi      = sample_k.wi;
-            Float inv_Jk = dr::rcp(sample_k.Jp);
-            Float pdfMk  = sample_k.pdfM;
-
-            Float pdfSum = sample_k.pdf_lk;
-            // P(j->k) is just p(k), if k == j
-            if (k > 0)
-                pdfSum += sample_k.pdf;
-            Bool cond = k > 0 ? sample_k.valid : bsdf.reuse;
-            // Use dr::is_stmt to potentially skip the inner loop.
-            pdfSum += DR_IF(
-                cond, (m_fast_mis, pdfMk, inv_Jk, si_k, samples, n_sensors, k, bsdf),
-                (Float pdfSum = 0.f;
-                 //  Sum propability of all pdf j to k
-                 //  We are avoiding masking as much as possible in the nested
-                 //  loops (ie the pdfs are already set to 0 before)
-                 for (uint32_t j = 1; j < n_sensors; j++) {
-                     auto &sample_j = samples[j];
-                     // Valid = selection + visibility
-                     Bool valid = sample_j.valid;
-                     // Skip known/invalid samples
-                     if (j == k || dr::none_or<false>(valid)) {
-                         continue;
-                     }
-                     // Sum only valid samples (visible, and after selection)
-                     Float J = sample_j.Jp * inv_Jk;
-                     Float pdf_Mat =
-                         m_fast_mis
-                             ? tv_pdf_fast(sample_j.wo_r, si_k.wi, pdfMk, bsdf, valid)
-                             : tv_pdf(sample_j.wo_r, si_k, pdfMk, bsdf, valid);
-                     dr::masked(pdf_Mat, bsdf.diffuse) = 1.f;
-                     // p(j) * J(j->k) * V(k) * p(J(j->k)) * p(M(j->k))
-                     // Optimized J(j->k) * pdf(J(j->k)) is just min(J^2, 1)
-                     pdfSum += sample_j.pdf * dr::minimum(dr::square(J), 1.f) * pdf_Mat;
-                 } return pdfSum;),
-                (return Float(0.f);));
-
-            sample_k.weight = sample_k.pdf_lk / pdfSum;
-        }
-    }**/
-
+    /**
+     * \brief Compute MIS weights between multiple cameras
+     */
+    void mis_weights(SampleData *samples, uint n_sensors, SurfaceInteraction3f &si_k, const BSDFData &bsdf_data) const;
+    
     MI_DECLARE_CLASS()
     uint32_t m_spp_pass_lim;
     bool m_sa_reuse;

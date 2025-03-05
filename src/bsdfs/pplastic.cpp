@@ -436,7 +436,7 @@ public:
         return dr::select(active, prob_specular * p_specular + prob_diffuse * p_diffuse, 0.f);
     }
 
-    Float eval_rougness(const SurfaceInteraction3f&, Mask active) const override{
+    Float eval_roughness(const SurfaceInteraction3f&, Mask active) const override{
         Float alpha = dr::sqrt(0.5f * (dr::square(m_alpha_u) + dr::square(m_alpha_v)));
         return dr::select(active, alpha, 0.f);
     }

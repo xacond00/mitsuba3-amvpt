@@ -604,7 +604,7 @@ public:
                  dr::select(active, pdf * dr::abs(dwh_dwo), 0.f) };
     }
 
-    Float eval_rougness(const SurfaceInteraction3f& si, Mask active) const override{
+    Float eval_roughness(const SurfaceInteraction3f& si, Mask active) const override{
         auto alpha_u = m_alpha_u->eval_1(si, active);
         auto alpha_v = m_alpha_v->eval_1(si, active);
         Float alpha = dr::sqrt(0.5f * (dr::square(alpha_u) + dr::square(alpha_v)));

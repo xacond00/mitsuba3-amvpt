@@ -183,7 +183,7 @@ public:
         return m_reflectance->eval(si, active);
     }
 
-    Float eval_rougness(const SurfaceInteraction3f&, Mask active) const override{
+    Float eval_roughness(const SurfaceInteraction3f&, Mask active) const override{
         return Float(active);
     }
     

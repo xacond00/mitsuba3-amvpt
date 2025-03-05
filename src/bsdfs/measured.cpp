@@ -455,7 +455,7 @@ public:
     }
 
     // Average for now
-    Float eval_rougness(const SurfaceInteraction3f&, Mask active) const override{
+    Float eval_roughness(const SurfaceInteraction3f&, Mask active) const override{
         return dr::select(active, 0.5f, 0.f);
     }
 

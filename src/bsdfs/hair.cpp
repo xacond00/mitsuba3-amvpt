@@ -766,7 +766,7 @@ private:
         }
     }
 
-    Float eval_rougness(const SurfaceInteraction3f&, Mask active) const override{
+    Float eval_roughness(const SurfaceInteraction3f&, Mask active) const override{
         Float alpha = dr::sqrt(0.5f * (dr::square(m_longitudinal_roughness) + dr::square(m_azimuthal_roughness)));
         return dr::select(active, alpha, 0.f);
     }
