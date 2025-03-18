@@ -45,3 +45,9 @@
 [submodule "ext/nanobind"]
 	path = ext/nanobind
 	url = https://github.com/wjakob/nanobind.git
+[submodule "src/mitsuba/gui/imgui"]
+	path = src/mitsuba/gui/imgui
+	url = https://github.com/ocornut/imgui.git
+[submodule "src/mitsuba/gui/SDL"]
+	path = src/mitsuba/gui/SDL
+	url = https://github.com/libsdl-org/SDL.git
