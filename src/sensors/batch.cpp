@@ -85,14 +85,16 @@ timings specified for the `batch` sensor itself.
         }
 */
 
-MI_VARIANT class BatchSensor final : public Sensor<Float, Spectrum> {
+MI_VARIANT class BatchSensor final : public MultiSensor<Float, Spectrum> {
 public:
-    MI_IMPORT_BASE(Sensor, m_film, m_shape, m_needs_sample_3, sample_wavelengths)
+    MI_IMPORT_BASE(MultiSensor, m_film, m_shape, m_needs_sample_3, sample_wavelengths)
     MI_IMPORT_TYPES(Shape, SensorPtr)
+    using Sensor_t = Sensor<Float, Spectrum>;
 
     BatchSensor(const Properties &props) : Base(props) {
+        m_reverse    = std::pair<bool,bool>(props.get<bool>("reverse_x", false), props.get<bool>("reverse_y", false));
         for (auto [unused, o] : props.objects()) {
-            ref<Base> sensor(dynamic_cast<Base *>(o.get()));
+            ref<Sensor_t> sensor(dynamic_cast<Base *>(o.get()));
             ref<Shape> shape(dynamic_cast<Shape *>(o.get()));
 
             if (sensor) {
@@ -137,6 +139,7 @@ public:
         UInt32 idx_u = UInt32(idx_f);
 
         UInt32 index = dr::minimum(idx_u, (uint32_t) (m_sensors.size() - 1));
+        if(m_reverse.first) index = m_sensors.size() - index - 1;
         SensorPtr sensor = dr::gather<SensorPtr>(m_sensors_dr, index, active);
 
 
@@ -156,6 +159,26 @@ public:
         return { ray, spec };
     }
 
+    std::tuple<Ray3f, Spectrum, UInt32>
+    sample_ray_idx(Float time, Float wavelength_sample, const Point2f &position_sample,
+                const Point2f &aperture_sample, Mask active = true) const override{
+                    Float  idx_f = position_sample.x() * (ScalarFloat) m_sensors.size();
+                    UInt32 idx_u = UInt32(idx_f);
+            
+                    UInt32 index = dr::minimum(idx_u, (uint32_t) (m_sensors.size() - 1));
+                    if(m_reverse.first) index = (m_sensors.size() - 1) - index;
+
+                    SensorPtr sensor = dr::gather<SensorPtr>(m_sensors_dr, index, active);
+            
+                    Point2f position_sample_2(idx_f - Float(idx_u), position_sample.y());
+            
+                    auto [ray, spec] =
+                        sensor->sample_ray(time, wavelength_sample, position_sample_2,
+                                           aperture_sample, active);
+                    m_last_index = index;
+                    return { ray, spec, index };
+    }
+
     std::pair<RayDifferential3f, Spectrum>
     sample_ray_differential(Float time, Float wavelength_sample,
                             const Point2f &position_sample,
@@ -168,6 +191,8 @@ public:
         UInt32 idx_u = UInt32(idx_f);
 
         UInt32 index = dr::minimum(idx_u, (uint32_t) (m_sensors.size() - 1));
+        if(m_reverse.first) index = (m_sensors.size() - 1) - index;
+
         SensorPtr sensor = dr::gather<SensorPtr>(m_sensors_dr, index, active);
 
         Point2f position_sample_2(idx_f - Float(idx_u), position_sample.y());
@@ -184,6 +209,12 @@ public:
         m_last_index = index;
 
         return { ray, spec };
+    }
+
+    std::tuple<DirectionSample3f, Float, Bool, Mask>
+    sample_surface(const Interaction3f &it, const Point2f &sample, const UInt32& idx, Mask active) const override{
+        SensorPtr sensor = dr::gather<SensorPtr>(m_sensors_dr, idx, active);
+        return sensor->sample_surface(it, sample, idx, active);
     }
 
     std::pair<DirectionSample3f, Spectrum>
@@ -279,13 +310,40 @@ public:
         }
     }
 
+    std::pair<bool, bool> reverse_axis() const override {return m_reverse;}
+
+    uint32_t n_sensors() const override {return m_sensors.size();}
+    
+    ScalarVector2u grid_dim() const override{return {m_sensors.size(), 1};}
+
+    std::vector<Sensor_t *> sensors() override{
+        std::vector<Sensor_t *> res;
+        res.reserve(n_sensors());
+        for(auto &sens : m_sensors)
+            res.emplace_back(sens.get());
+        return res;
+    }
+
+    std::vector<const Sensor_t *> sensors() const override{
+        std::vector<const Sensor_t *> res;
+        res.reserve(n_sensors());
+        for(auto &sens : m_sensors)
+            res.emplace_back(sens.get());
+        return res;
+    }
+
+    SensorPtr gather(const UInt32 &idx, Mask active = true)const override{
+        return dr::gather<SensorPtr>(m_sensors_dr, idx, active);
+    }
+
     MI_DECLARE_CLASS()
 private:
-    std::vector<ref<Base>> m_sensors;
+    std::vector<ref<Sensor_t>> m_sensors;
     DynamicBuffer<SensorPtr> m_sensors_dr;
     mutable UInt32 m_last_index;
+    std::pair<bool,bool> m_reverse;
 };
 
-MI_IMPLEMENT_CLASS_VARIANT(BatchSensor, Sensor)
+MI_IMPLEMENT_CLASS_VARIANT(BatchSensor, MultiSensor)
 MI_EXPORT_PLUGIN(BatchSensor, "BatchSensor");
 NAMESPACE_END(mitsuba)

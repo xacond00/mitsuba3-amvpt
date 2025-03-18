@@ -391,6 +391,9 @@ private:
 
         return std::make_tuple(pd, th, td);
     }
+    Float eval_roughness(const SurfaceInteraction3f&, Mask active) const override{
+        return dr::select(active, m_alpha_sample, 0.f);
+    }
 
     MI_DECLARE_CLASS()
 private:

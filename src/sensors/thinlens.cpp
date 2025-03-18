@@ -190,6 +190,10 @@ public:
         m_camera_to_sample = perspective_projection(
             m_film->size(), m_film->crop_size(), m_film->crop_offset(),
             m_x_fov, Float(m_near_clip), Float(m_far_clip));
+            
+        // Lens shift part
+        m_camera_to_sample.matrix.entry(0, 2) += Base::m_lens_shift;
+        m_camera_to_sample.inverse_transpose = dr::inverse_transpose(m_camera_to_sample.matrix);
 
         m_sample_to_camera = m_camera_to_sample.inverse();
 
@@ -230,7 +234,6 @@ public:
         // Compute the sample position on the near plane (local camera space).
         Point3f near_p = m_sample_to_camera *
                         Point3f(position_sample.x(), position_sample.y(), 0.f);
-
         // Aperture position
         Point2f tmp = m_aperture_radius * warp::square_to_uniform_disk_concentric(aperture_sample);
         Point3f aperture_p(tmp.x(), tmp.y(), 0.f);
@@ -329,8 +332,11 @@ public:
         // Compute importance value
         Float ct     = Frame3f::cos_theta(local_d),
               inv_ct = dr::rcp(ct);
-        Point3f scr = m_camera_to_sample.transform_affine(
-            aperture_p + local_d * (m_focus_distance * inv_ct));
+        // Fixed projection (OA 2025)
+        auto film_plane = (aperture_p * (1.f / m_focus_distance) + (local_d / local_d.z()));
+        Point3f scr = m_camera_to_sample.transform_affine(film_plane);
+        //Point3f scr = m_camera_to_sample.transform_affine(
+        //    aperture_p + local_d * (m_focus_distance * inv_ct));
         Mask valid = dr::all(scr >= 0.f) && dr::all(scr <= 1.f);
         Float value = dr::select(valid, m_normalization * inv_ct * inv_ct * inv_ct, 0.f);
 
@@ -349,6 +355,67 @@ public:
         return { ds, Spectrum(value * inv_dist * inv_dist) };
     }
 
+    std::tuple<DirectionSample3f, Float, Bool, Mask>
+    sample_surface(const Interaction3f &it, const Point2f &sample, const UInt32&,
+                   Mask active) const override {
+        // Transform the reference point into the local coordinate system
+        Transform4f trafo = m_to_world.value();
+        Point3f ref_p     = trafo.inverse().transform_affine(it.p);
+
+        // Check if it is outside of the clip range
+        DirectionSample3f ds = dr::zeros<DirectionSample3f>();
+        active &= (ref_p.z() >= m_near_clip) && (ref_p.z() <= m_far_clip);
+        if (dr::none_or<false>(active))
+            return { ds, 0.f, active, active };
+
+        // Sample a position on the aperture (in local coordinates)
+        Point2f tmp =
+            warp::square_to_uniform_disk_concentric(sample) * m_aperture_radius;
+        Point3f aperture_p(tmp.x(), tmp.y(), 0);
+
+        // Compute the normalized direction vector from the aperture position to
+        // the referent point
+        Vector3f local_d = ref_p - aperture_p;
+        Float dist       = dr::norm(local_d);
+        Float inv_dist   = dr::rcp(dist);
+        local_d *= inv_dist;
+
+        // Compute importance value
+        Float ctf   = Frame3f::cos_theta(local_d);
+        Float ictf  = dr::rcp(ctf);
+        Float ictf3 = ictf * ictf * ictf;
+        auto film_plane = (aperture_p * (1.f / m_focus_distance) + (local_d / local_d.z()));
+        Point2f scr = dr::head<2>(m_camera_to_sample.transform_affine(film_plane));
+        //scr.x() *= 1.f / m_focus_distance;
+        //scr.y() *= 1.f / m_focus_distance;
+        active &= dr::all(scr >= 0.f) && dr::all(scr <= 1.f);
+
+        if (dr::none_or<false>(active))
+            return { ds, 0.f, active, active };
+        // Determine the surface orientation, used later
+
+         // 1 / A_lens
+        Float pdf_lens = dr::rcp(dr::square(m_aperture_radius) * dr::Pi<Float>);
+        // 1 / (A_film * ctf^3)
+        Float pdf_film = m_normalization * ictf3;
+       
+        // inv_r^2 * cts / p_dist^2 * (film_d^2 / ctf^3) -> this is Jac. term
+        ds.pdf  = pdf_lens * pdf_film;
+        ds.uv   = scr * m_resolution;
+        ds.p    = trafo.transform_affine(aperture_p);
+        ds.d    = (ds.p - it.p) * inv_dist;
+        ds.dist = dist;
+        ds.n    = trafo * Vector3f(0.f, 0.f, 1.f);
+        // Cos(theta_surf)
+        Float cts = dr::dot(ds.d, it.n);
+        // Determine the surface orientation, used later
+        Bool face = cts > 0.f;
+        cts       = dr::abs(cts);
+        // Jacobian term
+        Float Jp = (cts * inv_dist * inv_dist) * ds.pdf; // ir2 * ictf3;
+
+        return { ds, Jp, face, active };
+    }
 
     ScalarBoundingBox3f bbox() const override {
         ScalarPoint3f p = m_to_world.scalar() * ScalarPoint3f(0.f);

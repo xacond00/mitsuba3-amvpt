@@ -515,6 +515,13 @@ public:
         return { F * value & active, dr::select(active, pdf, 0.f) };
     }
 
+    Float eval_roughness(const SurfaceInteraction3f& si, Mask active) const override{
+        auto alpha_u = m_alpha_u->eval_1(si, active);
+        auto alpha_v = m_alpha_v->eval_1(si, active);
+        Float alpha = dr::sqrt(0.5f * (dr::square(alpha_u) + dr::square(alpha_v)));
+        return dr::select(active, alpha, 0.f);
+    }
+
     std::string to_string() const override {
         std::ostringstream oss;
         oss << "RoughConductor[" << std::endl
