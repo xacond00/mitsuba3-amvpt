@@ -2,7 +2,6 @@
 /*---------------------------------------------------------------------------------------------*/
 /*Bc. Ondrej Ac, FIT VUT Brno, 2025*/
 /*---------------------------------------------------------------------------------------------*/
-#include "dr_macros.h"
 #include <cstdint>
 #include <drjit/morton.h>
 #include <mitsuba/core/fstream.h>
@@ -119,14 +118,21 @@ public:
     MI_IMPORT_TYPES(Scene, Sensor, Film, BSDF, BSDFPtr, ImageBlock, Sampler, Medium, Emitter, EmitterPtr, SensorPtr)
 
     MVPathIntegrator(const Properties &props) : Base(props) {
-        m_thin_lens    = false;
         m_sa_reuse     = props.get<bool>("sa_reuse", false);
         m_force_eval   = props.get<bool>("force_eval", true);
         m_sa_mis       = props.get<bool>("sa_mis", false);
         m_debug        = props.get<bool>("debug", false);
+        m_adaptive     = props.get<uint32_t>("adaptive", 0);
         m_fast_mis     = props.get<bool>("fast_mis", false);
         m_spp_pass_lim = props.get<uint32_t>("spp_pass_lim", 16);
+        m_reuse_count  = props.get<uint32_t>("reuse_count", 1);
     }
+
+    TensorXf render(Scene *scene, Sensor *init_sensor, UInt32 seed, uint32_t init_spp, bool develop,
+                    bool evaluate) override;
+
+    //! @} AMVPT
+    // =============================================================
 
     // Prefix data needed to compute suffix
     struct PrefixData {
@@ -152,11 +158,12 @@ public:
         Float pdfM;    // Precomputed material pdf
         Float pdf;     // Pdf of this view
         Float pdf_lk;  // Pdf from primary to this view
-        Float Jp, iJp;      // Partial Jacobian term and its inverse
+        Float Jp, iJp; // Partial Jacobian term and its inverse
         UInt32 idx;    // Sensor index
         Mask indirect; // Sample indirect lighting ?
         Mask valid;    // Is visible, has same material ?
-        DRJIT_STRUCT(SampleData, result, bsdf_val, wi, wo_r, pos, weight, pdfM, pdf, pdf_lk, Jp, iJp, idx, indirect, valid);
+        DRJIT_STRUCT(SampleData, result, bsdf_val, wi, wo_r, pos, weight, pdfM, pdf, pdf_lk, Jp, iJp, idx, indirect,
+                     valid);
     };
 
     struct BSDFData {
@@ -165,54 +172,78 @@ public:
         Bool diffuse, reuse;
         DRJIT_STRUCT(BSDFData, bsdf, alpha, sqr_a, rsqrt_a, diffuse, reuse);
     };
-    // Evaluate sample with reuse
-    // 1) Surface emission
-    // 2) Primary hit info
-    //     a) Emitter sample and direction
-    //     b) Material properties - check if delta
-    // 3) Sensor selection and MIS
-    //     a) Select similar cameras
-    //     b) Compute MIS weights
-    // 4) Evaluation of direct lighting with MIS
-    // 5) Evaluation of indirect lighting with MIS
-    // 6) Save the radiance to each sample
-    Mask sample_multi(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
-                      SampleData *samples, const Ray3f &p_ray, const Point2f &p_app, Mask active) const;
 
-    TensorXf render(Scene *scene, Sensor *init_sensor, UInt32 seed, uint32_t init_spp, bool develop,
-                    bool evaluate) override;
-
-    // Renders scene from primary sensor and reuses samples in other sensors
+    /**
+     * \brief Evaluate shared samples between cameras in group
+     */
+    std::pair<Mask, Mask> sample_multi(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
+                                       SampleData *samples, uint32_t n_samples, const Ray3f &p_ray,
+                                       const Point2f &p_app, Mask active) const;
+    /**
+     * \brief Renders scene from primary sensor and reuses samples in other sensors
+     */
     void render_multisample(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
-                            ImageBlock *block, const Vector2f &pos, SampleData *sampleData, Mask active = true) const;
-    //! @}
+                            ImageBlock *block, const Vector2f &pos, SampleData *sampleData, uint32_t n_samples,
+                            Mask active = true) const;
+    /**
+     * \brief Compute MIS weights between multiple selected cameras
+     */
+    void mis_weights(SampleData *samples, uint n_samples, SurfaceInteraction3f &si_k, const BSDFData &bsdf_data) const;
+
+    /**
+     * \brief Select reusable cameras based on material and jacobian propabilities. Fills in sample data accordingly.
+     *
+     * \param si, si_k, bsdf, wo, p_app, rand_2, rand_1, p_hit - input parameters constructed beforehand
+     *
+     * \param bsdf_sample  - filled with output direction wo based on selection
+     *
+     * \param direct_pdf  - weighted direct contribution pdf
+     *
+     * \return Nothing, as &bsdf_sample and &direct_pdf are modified directly
+     */
+    void camera_selection(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
+                          SampleData *samples, uint n_samples, const SurfaceInteraction3f &si, SurfaceInteraction3f &si_k, const BSDFData &bsdf,
+                          const Vector3f &wo, const Point2f &p_app, const Point2f &rand_2, const Float &rand_1,
+                          const Bool &p_hit, BSDFSample3f &bsdf_sample, Float &direct_pdf) const;
+    // Given a primary intersection data (prefix), sample suffix
+    // Returns spectrum and mask
+    // Nearly identical to sample_single
+    std::pair<Spectrum, Bool> sample_suffix(const Scene *scene, Sampler *sampler, const PrefixData &pd) const;
+
+    //! @} Non-AMVPT
     // =============================================================
+
+    // Classic path tracing algorithm (except stripped of not needed parameters)
+    std::pair<Spectrum, Bool> sample_single(const Scene *scene, Sampler *sampler, const RayDifferential3f &ray_,
+                                            Bool active) const;
     void render_block_(const Scene *scene, const Sensor *sensor, Sampler *sampler, ImageBlock *block,
                        uint32_t sample_count, UInt32 seed, uint32_t block_id, uint32_t block_size) const;
     // Stock implementation
     void render_sample(const Scene *scene, const Sensor *sensor, Sampler *sampler, ImageBlock *block,
                        const Vector2f &pos, Mask active = true) const;
-    // Classic path tracing algorithm (except stripped of not needed parameters)
-    std::pair<Spectrum, Bool> sample_single(const Scene *scene, Sampler *sampler, const RayDifferential3f &ray_,
-                                            Bool active) const;
-    // Given a primary intersection data (prefix), sample suffix
-    // Returns spectrum and mask
-    // Nearly identical to sample_single
-    Spectrum sample_suffix(const Scene *scene, Sampler *sampler, const PrefixData &pd) const;
+
+    //! @} Misc
+    // =============================================================
 
     std::string to_string() const override {
         return tfm::format("MVPathIntegrator[\n"
                            "  max_depth = %u,\n"
                            "  rr_depth = %u\n"
                            "  sa_reuse = %u\n"
+                           "  sa_mis = %u\n"
+                           "  fast_mis = %u\n"
+                           "  reuse_count = %u\n"
+                           "  adaptive = %u\n"
                            "  spp_pass_lim = %u\n"
                            "]",
-                           m_max_depth, m_rr_depth, m_sa_reuse, m_spp_pass_lim);
+                           m_max_depth, m_rr_depth, m_sa_reuse, m_sa_mis, m_fast_mis, m_reuse_count, m_adaptive,
+                           m_spp_pass_lim);
     }
 
     template <bool primary>
-    auto sensors_visible(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, const Point2f &ap_sample, 
-                         const SurfaceInteraction3f &si, Bool prim_face, const UInt32 &idx, const Mask &active) const {
+    static auto sensors_visible(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor,
+                                const Point2f &ap_sample, const SurfaceInteraction3f &si, Bool prim_face,
+                                const UInt32 &idx, const Mask &active) {
         auto [sensor_ds, Jp, face, valid] = sensor->sample_surface(si, ap_sample, idx, active);
 
         // If camera isn't primary, check geometric visibility too...
@@ -261,14 +292,6 @@ public:
         return dr::select(active, p, 0.f);
     }
 
-    /// Compute a multiple importance sampling weight using the power heuristic
-    static Float mis_weight(Float pdf_a, Float pdf_b) {
-        pdf_a *= pdf_a;
-        pdf_b *= pdf_b;
-        Float w = pdf_a / (pdf_a + pdf_b);
-        return dr::detach<true>(dr::select(dr::isfinite(w), w, 0.f));
-    }
-
     /**
      * \brief Perform a Mueller matrix multiplication in polarized modes, and a
      * fused multiply-add otherwise.
@@ -279,19 +302,39 @@ public:
         else
             return dr::fmadd(a, b, c);
     }
+    /// Compute a multiple importance sampling weight using the power heuristic
+    static Float mis_weight(Float pdf_a, Float pdf_b) {
+        pdf_a *= pdf_a;
+        pdf_b *= pdf_b;
+        Float w = pdf_a / (pdf_a + pdf_b);
+        return dr::detach<true>(dr::select(dr::isfinite(w), w, 0.f));
+    }
     /**
-     * \brief Compute MIS weights between multiple cameras
+     * \brief Gather inplace
      */
-    void mis_weights(SampleData *samples, uint n_sensors, SurfaceInteraction3f &si_k, const BSDFData &bsdf_data) const;
-    
+    template <class Type> static void nested_gather(Type &data, const UInt32 &idx) {
+        if constexpr (drjit::depth_v<Type> > 1) {
+            for (uint32_t i = 0; i < data.size(); i++) {
+                data.entry(i) = dr::gather<drjit::value_t<Type>>(data.entry(i), idx);
+            }
+        } else if constexpr (drjit::is_array_v<Type>) {
+            data = dr::gather<Type>(data, idx);
+        } else if constexpr (drjit::is_drjit_struct_v<Type>) {
+            drjit::traverse_1(data.fields_(), [&idx](auto &el) { nested_gather(el, idx); });
+        } else {
+            static_assert(false, "WTF");
+        }
+    }
+
     MI_DECLARE_CLASS()
     uint32_t m_spp_pass_lim;
     bool m_sa_reuse;
     bool m_force_eval;
     bool m_sa_mis;
     bool m_fast_mis;
-    bool m_thin_lens;
     bool m_debug;
+    uint32_t m_adaptive;
+    uint32_t m_reuse_count;
 };
 
 NAMESPACE_END(mitsuba)

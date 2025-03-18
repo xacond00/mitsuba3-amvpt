@@ -1,7 +1,7 @@
 #pragma once
 
-// This being a header, is a 'hack' to get around the plugin system being limited to single source file per plugin
-#include "dr_macros.h"
+// This is a 'hack' to get around the plugin system being limited to single source file per plugin
+
 #include "mvpath.h"
 
 NAMESPACE_BEGIN(mitsuba)
@@ -55,7 +55,7 @@ MI_VARIANT void MVPT::render_multisample(const Scene *scene, const MultiSensor<F
         block->put(sampleData[0].pos, ray.wavelengths, Float(adapt_mask), alpha, 1.f, true);
         return;
     } else if (n_adapt) {
-        dr::masked(sampleData[0].weight, adapt_mask) = sampleData[0].weight * adapt_w;
+        //dr::masked(sampleData[0].weight, adapt_mask) = sampleData[0].weight * adapt_w;
     }
     // Accumulate all samples
     for (uint32_t i = 0; i < n_samples; i++) {
@@ -75,8 +75,8 @@ MI_VARIANT void MVPT::render_multisample(const Scene *scene, const MultiSensor<F
                    sample.valid);
     }
 
-    // Fill in missing samples - only delta (not null) or not visible at all
-    if (n_adapt) {
+    // Fill in missing samples
+    if (n_adapt && false) {
         if constexpr (dr::is_array_v<Float>) {
             UInt32 idx = dr::compress(adapt_mask);
             idx        = dr::repeat(idx, n_adapt);
@@ -88,15 +88,13 @@ MI_VARIANT void MVPT::render_multisample(const Scene *scene, const MultiSensor<F
                 sampler2->seed(wavefront, wavefront);
                 Log(LogLevel::Info, "Adaptive samples: %d", wavefront);
 
-                if (sensor->needs_aperture_sample())
+                if (sensor->needs_aperture_sample()) {
                     nested_gather(aperture_sample, idx);
-
+                }
                 if (sensor->shutter_open_time() > 0.f)
-                    nested_gather(time, idx);
-
+                    time = dr::gather<Float>(time, idx);
                 if constexpr (is_spectral_v<Spectrum>)
                     wavelength_sample = sampler2->next_1d();
-
                 nested_gather(sample_pos, idx);
                 adjusted_pos = dr::fmadd(sample_pos, scale, offset);
                 // We need to rebuild all rays, otherwise memory consumption goes off the roof
@@ -104,7 +102,6 @@ MI_VARIANT void MVPT::render_multisample(const Scene *scene, const MultiSensor<F
                 // If we do this inside sample_multi(), we can reuse primary hit and other data, BUT:
                 //      a) Gathering primary SurfaceInteraction is memory expensive (10x the normal)
                 //      b) Kernel with different size is launched directly inbetween other kernel
-                //      c) It's much slower - by 50%
                 auto [spec, valid] = sample_single(scene, sampler2.get(), ray, true);
                 // if (m_force_eval)
                 //     dr::eval(spec);
@@ -115,29 +112,29 @@ MI_VARIANT void MVPT::render_multisample(const Scene *scene, const MultiSensor<F
     }
 }
 
-// Evaluate sample with reuse
-// 1) Surface emission
-// 2) Primary hit info
-//     a) Emitter sample and direction
-//     b) Material properties - check if delta
-// 3) Sensor selection and MIS
-//     a) Select similar cameras
-//     b) Compute MIS weights
-// 4) Evaluation of direct lighting with MIS
-// 5) Evaluation of indirect lighting with MIS
-// 6) Save the radiance to each sample
-
 MI_VARIANT std::pair<typename MVPT::Mask, typename MVPT::Mask>
 MVPT::sample_multi(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
                    SampleData *samples, uint32_t n_samples, const Ray3f &p_ray, const Point2f &p_app,
                    Mask active) const {
-    Mask adapt_mask = false;
+    // Evaluate sample with reuse
+    // 1) Surface emission
+    // 2) Primary hit info
+    //     a) Emitter sample and direction
+    //     b) Material properties - check if delta
+    // 3) Sensor selection and MIS
+    //     a) Select similar cameras
+    //     b) Compute MIS weights
+    // 4) Evaluation of direct lighting with MIS
+    // 5) Evaluation of indirect lighting with MIS
+    // 6) Save the radiance to each sample
     if (unlikely(m_max_depth == 0))
-        return { false, adapt_mask };
+        return { false, false };
     // Primary sensor and sample
     auto &p_sample = samples[0];
+    PrefixData pd;
     // Valid ray is used to determine alpha values
     Mask valid_ray = !m_hide_emitters && (scene->environment() != nullptr);
+    pd.depth       = 0;
     auto prev_si   = dr::zeros<Interaction3f>();
 
     // Find prefix (primary hit point)
@@ -156,7 +153,7 @@ MVPT::sample_multi(const Scene *scene, const MultiSensor<Float, Spectrum> *senso
     }
     // Continue tracing from this point
     if (dr::none_or<false>(p_hit)) {
-        return { valid_ray, adapt_mask }; // early exit for scalar mode
+        return { valid_ray, false }; // early exit for scalar mode
     }
     // Get the BSDF ptr from primary hit
     BSDFPtr bsdf = si.bsdf(p_ray);
@@ -210,28 +207,105 @@ MVPT::sample_multi(const Scene *scene, const MultiSensor<Float, Spectrum> *senso
     bool should_mis   = m_sa_mis && should_reuse;
     //  Temporary interaction used for computing pdfs from different views
     SurfaceInteraction3f si_k = si;
-
     // ------ Camera selection-------------------------------------------------------------------------
     // ------------------------------------------------------------------------------------------------
-
-    if (should_mis) { // MVPT algorithm
-        // Fill in required BSDFData for selection and MIS
+    // Temporarily set validity of primary sample to valid intersection.
+    // It is set to true at the end, to accumulate background samples too...
+    if (should_mis) {
         BSDFData bsdf_data;
-        // eval_roughness() is extension to stock BSDF class by me
+        BSDFContext glossy_ctx(TransportMode::Radiance, (uint32_t) BSDFFlags::Glossy);
+        // eval_roughness() is extension to stock BSDF class
         bsdf_data.alpha   = bsdf->eval_roughness(si, active);
         bsdf_data.sqr_a   = dr::fmsub(bsdf_data.alpha, bsdf_data.alpha, 1.f);
         bsdf_data.rsqrt_a = dr::rsqrt(bsdf_data.alpha);
         bsdf_data.diffuse = flag_diff;
         bsdf_data.reuse   = reuse;
         bsdf_data.bsdf    = bsdf;
-        p_sample.bsdf_val = bsdf_val;
-        // Select suitable cameras (modifies bsdf_sample and direct_pdf)
-        camera_selection(scene, sensor, sampler, samples, n_samples, si, si_k, bsdf_data, wo, p_app, rand_2, rand_1,
-                         p_hit, bsdf_sample, direct_pdf);
-        // Weight the selected cameras
+        // Get primary face orientation and pdf
+        Bool p_face                = Frame3f::cos_theta(si.wi) > 0.f;
+        auto [p_ds, p_Jp, p_valid] = sensors_visible<true>(scene, sensor, p_app, si, p_face, p_sample.idx, p_hit);
+        p_sample.pdf               = p_ds.pdf;
+        p_sample.pdf_lk            = p_ds.pdf;
+        p_sample.Jp                = p_Jp;
+        p_sample.iJp               = dr::select(p_hit, dr::rcp(p_Jp), 0.f);
+        p_sample.wi                = si.wi;
+        p_sample.wo_r              = reflect(si.wi);
+        p_sample.valid             = p_hit;
+        p_sample.indirect          = p_hit;
+        p_sample.bsdf_val          = bsdf_val;
+        // Material pdf approximation (fits GGX perfectly)
+        p_sample.pdfM = m_fast_mis ? dr::square(Frame3f::cos_theta(dr::normalize(p_sample.wi + p_sample.wo_r)))
+                                   : bsdf->pdf(glossy_ctx, si, p_sample.wo_r, p_hit);
+        dr::masked(p_sample.pdfM, flag_diff) = 1.f;
+        Float n_direct                       = 1.f;
+        Float n_indir                        = 2.f;
+        // It isn't practical to move this block into a separate function,
+        // because number of params would be absolutely ridiculous
+        for (uint32_t k = 1; k < n_samples; k++) {
+            // Primary camera starts with valid hit, and pdf_l->k = pdf_l, so it must be skipped.
+            auto &sample_k = samples[k];
+            // Checks for visibility of sample.
+            auto [ds, Jp, valid] = sensors_visible<false>(scene, sensor, p_app, si, p_face, sample_k.idx, reuse);
+            // If MIS is used to weight samples (amvpt algorithm).
+            sample_k.wi   = si.to_local(ds.d);
+            sample_k.wo_r = reflect(sample_k.wi);
+            si_k.wi       = sample_k.wi;
+            sample_k.pdfM = m_fast_mis ? dr::square(Frame3f::cos_theta(dr::normalize(si_k.wi + sample_k.wo_r)))
+                                       : bsdf->pdf(glossy_ctx, si_k, sample_k.wo_r, valid);
+            // Material selection pdf based on primary and secondary sample
+            Float pdf_Mat = m_fast_mis ? tv_pdf_fast(p_sample.wo_r, si_k.wi, sample_k.pdfM, bsdf_data, valid)
+                                       : tv_pdf(p_sample.wo_r, si_k, sample_k.pdfM, bsdf_data, valid);
+            dr::masked(pdf_Mat, flag_diff) = 1.f;
+            // Jacobian and its propability
+            Float J     = Jp * p_sample.iJp;
+            Float pdf_J = dr::select(J > 1.f, dr::rcp(J), J);
+            // Selection propability proportional to Jacobian and Pmat
+            Float pdf_Sel = pdf_Mat * pdf_J;
+            // Valid represents combination of visibility and material +
+            // jacobian selection. In primary sample it is true, if
+            // intersection is valid
+            valid &= sampler->next_1d() < pdf_Sel;
+            if (dr::none_or<false>(valid))
+                continue;
+
+            sample_k.Jp  = Jp;
+            sample_k.iJp = dr::select(valid, dr::rcp(Jp), 0.f);
+            sample_k.pos = ds.uv;
+            // p(k)
+            sample_k.pdf = dr::select(valid, ds.pdf, 0.f);
+            // p(l->k) = p(l) * J(l->k) * V(k) * p(J(l->k)) * p(M(l->k))
+            sample_k.pdf_lk = dr::select(valid, p_sample.pdf * J * pdf_Sel, 0.f);
+            sample_k.valid  = valid;
+            Bool indirect   = valid;
+            Bool direct     = valid;
+            // The selection of bsdf wo, as opposed to the original
+            // paper, is done right here. We reject the selection when the
+            // sampled bsdf is not the same type as the initial one. On
+            // top of that we evaluate mixture pdf of direct light sampling
+
+            // Propability to replace wo sample
+            Bool replace = n_indir * sampler->next_1d() < 1.f;
+            auto [bsdf_val_k, bsdf_pdf_k, bsdf_sample_k, bsdf_weight_k] =
+                bsdf->eval_pdf_sample(bsdf_ctx, si_k, wo, rand_1, rand_2, valid);
+            direct &= bsdf_pdf_k > 0.f;
+            //  Direct contribution mixture pdf
+            sample_k.bsdf_val = bsdf_val_k;
+            direct_pdf += dr::select(direct, bsdf_pdf_k, 0.f);
+            n_direct += Float(direct);
+            // Indirect contribution - replace wo with certain
+            // chance. Consider only same lobes (ie when viewing
+            // angle changes too much)
+            indirect &= bsdf_sample_k.sampled_type == bsdf_sample.sampled_type;
+            dr::masked(bsdf_sample.wo, indirect && replace) = bsdf_sample_k.wo;
+
+            n_indir += Float(indirect);
+
+            sample_k.indirect = indirect;
+        }
+        direct_pdf /= n_direct;
         mis_weights(samples, n_samples, si_k, bsdf_data);
 
-    } else if (should_reuse) { // Normal sampling
+    } else if (should_reuse) {
         p_sample.valid = p_hit;
         Bool p_face    = Frame3f::cos_theta(si.wi) > 0.f;
         for (uint32_t k = 1; k < n_samples; k++) {
@@ -269,12 +343,11 @@ MVPT::sample_multi(const Scene *scene, const MultiSensor<Float, Spectrum> *senso
     // ---------------------- BSDF sampling -----------------------------------------
     // ------------------------------------------------------------------------------
 
-    PrefixData pd;
-    pd.ray = si.spawn_ray(si.to_world(bsdf_sample.wo));
-
-    if (should_mis) { // Multiview BSDF mixture pdf
-        Float n_indir = 0.f;
-        Float pdf     = 0.f;
+    pd.ray        = si.spawn_ray(si.to_world(bsdf_sample.wo));
+    Float n_indir = 0.f;
+    // Multiview BSDF mixture pdf
+    if (should_mis) {
+        Float pdf = 0.f;
         for (uint32_t k = 0; k < n_samples; k++) {
             auto &sample_k = samples[k];
             Mask valid     = sample_k.indirect;
@@ -303,9 +376,7 @@ MVPT::sample_multi(const Scene *scene, const MultiSensor<Float, Spectrum> *senso
         }
         // Mixture pdf -> average when not delta, otherwise primary delta pdf
         bsdf_sample.pdf = dr::select(p_not_delta, pdf / n_indir, bsdf_sample.pdf);
-        // Set adaptive mask based on number of collected samples (just primary)
-        adapt_mask = p_hit && !flag_null && (n_indir <= 1.f);
-    } else { // Normal single pdf
+    } else {
         bsdf_weight = si.to_world_mueller(bsdf_weight, -bsdf_sample.wo, si.wi);
         if (dr::grad_enabled(pd.ray)) {
             pd.ray = dr::detach<true>(pd.ray);
@@ -322,8 +393,8 @@ MVPT::sample_multi(const Scene *scene, const MultiSensor<Float, Spectrum> *senso
     pd.throughput = should_mis ? 1.f : bsdf_weight;
     pd.eta        = bsdf_sample.eta;
     valid_ray |= p_hit && !flag_null;
-    // Use adaptive, only when hit is valid, isn't null interaction (transparency)
-    // and only primary camera was sampled.
+    
+    Mask adapt_mask = p_hit && !flag_null && (n_indir <= 1.f);
     // Information about the current vertex needed by the next iteration
     pd.si         = si;
     pd.bsdf_pdf   = bsdf_sample.pdf;
@@ -339,15 +410,42 @@ MVPT::sample_multi(const Scene *scene, const MultiSensor<Float, Spectrum> *senso
     valid_ray |= valid;
     if (m_force_eval)
         dr::eval(indirect);
-
-    // -------------------- Indirect lighting ---------------------
+    // -------------------- Iradiance accumulation ---------------------
     if (should_mis) {
         // In case of delta reflection, the bsdf_weight is already weighted by pdf
         Float pdfW = dr::select(p_not_delta, dr::rcp(bsdf_sample.pdf), 1.f);
         for (uint32_t k = 0; k < n_samples; k++) {
             auto &sample_k = samples[k];
-            if (dr::any_or<true>(sample_k.indirect)) {
-                sample_k.bsdf_val = si.to_world_mueller(sample_k.bsdf_val, -bsdf_sample.wo, sample_k.wi);
+            sample_k.bsdf_val = si.to_world_mueller(sample_k.bsdf_val, -bsdf_sample.wo, sample_k.wi);
+
+            if (k == 0 && m_adaptive) {
+                if constexpr (dr::is_array_v<Float>) {
+                    UInt32 idx = dr::compress(adapt_mask);
+                    //idx        = dr::repeat(idx, m_adaptive);
+                    dr::make_opaque(idx);
+                    size_t wavefront = dr::width(idx);
+                    auto ray = p_ray;
+                    if (wavefront > 0) {
+                        ref<Sampler> sampler2 = sampler->fork();
+                        sampler2->seed(wavefront, wavefront);
+                        nested_gather(pd.ray, idx);
+                        nested_gather(pd.eta, idx);
+                        nested_gather(pd.bsdf_pdf, idx);
+                        nested_gather(pd.bsdf_delta, idx);
+                        pd.depth = 1;
+                        pd.active = true;
+                        //nested_gather(pd.si, idx); uses even more memory
+                        pd.si = scene->ray_intersect(pd.ray, +RayFlags::All, true);
+                        auto [indir, val] = sample_suffix(scene, sampler2, pd);
+                        auto result = dr::zeros<Spectrum>(sampler->wavefront_size());
+                        dr::scatter(result, indir, idx, true, ReduceMode::NoConflicts);
+                        Float weight = dr::select(adapt_mask, 0.5f, 1.f);
+                        result = weight * (result + indirect);
+                        sample_k.result[sample_k.indirect] = spec_fma(sample_k.bsdf_val * pdfW, result, sample_k.result);
+                    }
+                }
+            }
+            else if (dr::any_or<true>(sample_k.indirect)) {
                 sample_k.result[sample_k.indirect] = spec_fma(sample_k.bsdf_val * pdfW, indirect, sample_k.result);
             }
         }
@@ -366,101 +464,6 @@ MVPT::sample_multi(const Scene *scene, const MultiSensor<Float, Spectrum> *senso
     p_sample.weight = dr::select(p_hit, p_sample.weight, 1.f);
     p_sample.valid  = active;
     return { valid_ray, adapt_mask };
-}
-
-MI_VARIANT void MVPT::camera_selection(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
-                                       SampleData *samples, uint n_samples, const SurfaceInteraction3f &si,
-                                       SurfaceInteraction3f &si_k, const BSDFData &bsdf, const Vector3f &wo,
-                                       const Point2f &p_app, const Point2f &rand_2, const Float &rand_1,
-                                       const Bool &p_hit, BSDFSample3f &bsdf_sample, Float &direct_pdf) const {
-
-    BSDFContext bsdf_ctx;
-    BSDFContext glossy_ctx(TransportMode::Radiance, (uint32_t) BSDFFlags::Glossy);
-
-    auto &p_sample = samples[0];
-    // Get primary face orientation and camera pdf
-    Bool p_face                = Frame3f::cos_theta(si.wi) > 0.f;
-    auto [p_ds, p_Jp, p_valid] = sensors_visible<true>(scene, sensor, p_app, si, p_face, p_sample.idx, p_hit);
-    p_sample.pdf               = p_ds.pdf;
-    p_sample.pdf_lk            = p_ds.pdf;
-    p_sample.Jp                = p_Jp;
-    p_sample.iJp               = dr::select(p_hit, dr::rcp(p_Jp), 0.f);
-    p_sample.wi                = si.wi;
-    p_sample.wo_r              = reflect(si.wi);
-    // Temporarily set validity of primary sample to valid intersection.
-    // It is set to true at the end, to accumulate background samples too...
-    p_sample.valid    = p_hit;
-    p_sample.indirect = p_hit;
-    // Material pdf approximation (fits GGX perfectly)
-    p_sample.pdfM = m_fast_mis ? dr::square(Frame3f::cos_theta(dr::normalize(p_sample.wi + p_sample.wo_r)))
-                               : bsdf.bsdf->pdf(glossy_ctx, si, p_sample.wo_r, p_hit);
-    dr::masked(p_sample.pdfM, bsdf.diffuse) = 1.f;
-    Float n_direct                          = 1.f;
-    Float n_indir                           = 2.f;
-    // It isn't practical to move this block into a separate function,
-    // because number of params would be absolutely ridiculous
-    for (uint32_t k = 1; k < n_samples; k++) {
-        // Primary camera starts with valid hit, and pdf_l->k = pdf_l, so it must be skipped.
-        auto &sample_k = samples[k];
-        // Checks for visibility of sample.
-        auto [ds, Jp, valid] = sensors_visible<false>(scene, sensor, p_app, si, p_face, sample_k.idx, bsdf.reuse);
-        // If MIS is used to weight samples (amvpt algorithm).
-        sample_k.wi   = si.to_local(ds.d);
-        sample_k.wo_r = reflect(sample_k.wi);
-        si_k.wi       = sample_k.wi;
-        sample_k.pdfM = m_fast_mis ? dr::square(Frame3f::cos_theta(dr::normalize(si_k.wi + sample_k.wo_r)))
-                                   : bsdf.bsdf->pdf(glossy_ctx, si_k, sample_k.wo_r, valid);
-        // Material selection pdf based on primary and secondary sample
-        Float pdf_Mat                     = m_fast_mis ? tv_pdf_fast(p_sample.wo_r, si_k.wi, sample_k.pdfM, bsdf, valid)
-                                                       : tv_pdf(p_sample.wo_r, si_k, sample_k.pdfM, bsdf, valid);
-        dr::masked(pdf_Mat, bsdf.diffuse) = 1.f;
-        // Jacobian and its propability
-        Float J     = Jp * p_sample.iJp;
-        Float pdf_J = dr::select(J > 1.f, dr::rcp(J), J);
-        // Selection propability proportional to Jacobian and Pmat
-        Float pdf_Sel = pdf_Mat * pdf_J;
-        // Valid represents combination of visibility and material +
-        // jacobian selection. In primary sample it is true, if
-        // intersection is valid
-        valid &= sampler->next_1d() < pdf_Sel;
-        if (dr::none_or<false>(valid))
-            continue;
-
-        sample_k.Jp  = Jp;
-        sample_k.iJp = dr::select(valid, dr::rcp(Jp), 0.f);
-        sample_k.pos = ds.uv;
-        // p(k)
-        sample_k.pdf = dr::select(valid, ds.pdf, 0.f);
-        // p(l->k) = p(l) * J(l->k) * V(k) * p(J(l->k)) * p(M(l->k))
-        sample_k.pdf_lk = dr::select(valid, p_sample.pdf * J * pdf_Sel, 0.f);
-        sample_k.valid  = valid;
-        Bool indirect   = valid;
-        Bool direct     = valid;
-        // The selection of bsdf wo, as opposed to the original
-        // paper, is done right here. We reject the selection when the
-        // sampled bsdf is not the same type as the initial one. On
-        // top of that we evaluate mixture pdf of direct light sampling.
-
-        // Propability to replace wo sample
-        Bool replace = n_indir * sampler->next_1d() < 1.f;
-        auto [bsdf_val_k, bsdf_pdf_k, bsdf_sample_k, bsdf_weight_k] =
-            bsdf.bsdf->eval_pdf_sample(bsdf_ctx, si_k, wo, rand_1, rand_2, valid);
-        direct &= bsdf_pdf_k > 0.f;
-        //  Direct contribution mixture pdf
-        sample_k.bsdf_val = bsdf_val_k;
-        direct_pdf += dr::select(direct, bsdf_pdf_k, 0.f);
-        n_direct += Float(direct);
-        // Indirect contribution - replace wo with certain
-        // chance. Consider only same lobes (ie when viewing
-        // angle changes too much)
-        indirect &= bsdf_sample_k.sampled_type == bsdf_sample.sampled_type;
-        dr::masked(bsdf_sample.wo, indirect && replace) = bsdf_sample_k.wo;
-
-        n_indir += Float(indirect);
-
-        sample_k.indirect = indirect;
-    }
-    direct_pdf /= n_direct;
 }
 
 MI_VARIANT void MVPT::mis_weights(SampleData *samples, uint n_sensors, SurfaceInteraction3f &si_k,

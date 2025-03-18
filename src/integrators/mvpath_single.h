@@ -274,8 +274,7 @@ MI_VARIANT std::pair<Spectrum, typename MVPT::Bool> MVPT::sample_single(const Sc
                 ls.active = active_next && (!rractive_ || rr_continue) && (throughput_max != 0.f);
             });
 
-        return { /* spec  = */ dr::select(ls.valid_ray, ls.result, 0.f),
-                 /* valid = */ ls.valid_ray };
+        return {dr::select(ls.valid_ray, ls.result, 0.f), ls.valid_ray };
     }
     // Dummy function to hide compiler warnings
     inline void dummy_function2() {}
