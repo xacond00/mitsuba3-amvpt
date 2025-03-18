@@ -18,11 +18,10 @@ MI_VARIANT typename MVPT::TensorXf MVPT::render(Scene *scene, Sensor *init_senso
     // Get subsensors
     std::vector<Sensor *> sensors = sensor->sensors();
     uint32_t n_sensors            = sensors.size();
-    m_sa_reuse &= n_sensors > 1;
 
+    bool reuse                     = (m_sa_reuse) & (n_sensors > 1) & (m_reuse_count != 1);
     const std::string &sensor_type = sensors[0]->class_()->name();
-    m_thin_lens                    = sensor_type == "ThinLensCamera";
-    if (!m_thin_lens && sensor_type != "PerspectiveCamera")
+    if (sensor_type != "ThinLensCamera" && sensor_type != "PerspectiveCamera")
         Throw("Subsensor must be of type ThinLensCamera or PerspectiveCamera !");
     // Render on a larger film if the 'high quality edges' feature is enabled
     Film *film               = sensor->film();
@@ -37,16 +36,16 @@ MI_VARIANT typename MVPT::TensorXf MVPT::render(Scene *scene, Sensor *init_senso
     uint32_t spp_per_pass = m_spp_pass_lim ? std::min(m_spp_pass_lim, spp) : spp;
 
     uint32_t n_passes = spp / spp_per_pass;
-    // Round SPP to multiple of spp_per_pass 
-    spp               = n_passes * spp_per_pass;
+    // Round SPP to multiple of spp_per_pass
+    spp = n_passes * spp_per_pass;
     sampler->set_sample_count(spp);
     // Check if the sampler is independent.
     bool independent = sampler->class_()->name() == "IndependentSampler";
 
-    if(!aov_names().empty())
+    if (!aov_names().empty())
         Throw("This integrator cannot be used with AOVs !");
     // Determine output channels and prepare the film with this information
-    //size_t n_channels = 
+    // size_t n_channels =
     film->prepare(aov_names());
     // Start the render timer (used for timeouts & log messages)
     m_render_timer.reset();
@@ -55,7 +54,9 @@ MI_VARIANT typename MVPT::TensorXf MVPT::render(Scene *scene, Sensor *init_senso
     if constexpr (!dr::is_jit_v<Float>) {
         // Render on the CPU using a spiral pattern
         uint32_t n_threads = (uint32_t) Thread::thread_count();
-
+        if (reuse) {
+            Log(Warn, "Scalar variant doesn't support sample reuse !");
+        }
         Log(Info, "Starting render job (%ux%u, %u sample%s,%s %u thread%s)", film_size.x(), film_size.y(), spp,
             spp == 1 ? "" : "s", n_passes > 1 ? tfm::format(" %u passes,", n_passes) : "", n_threads,
             n_threads == 1 ? "" : "s");
@@ -187,31 +188,56 @@ MI_VARIANT typename MVPT::TensorXf MVPT::render(Scene *scene, Sensor *init_senso
             pos -= film->rfilter()->border_size();
 
         pos += film->crop_offset();
-        //dr::make_opaque(pos);
-
-        std::unique_ptr<SampleData[]> sampleData(new SampleData[n_sensors]);
+        // Set sample size for multiview path tracing
+        uint32_t sampleSize = reuse ? m_reuse_count : 1;
+        sampleSize          = std::min(sampleSize, n_sensors);
+        // Selects from list of preferred values for optimal performance
+        if (sampleSize == 0 || n_sensors % sampleSize) {
+            sampleSize = 0;
+            // First check values >= 8
+            for (uint32_t p = 8; p < n_sensors; p++) {
+                if (n_sensors % p == 0) {
+                    sampleSize = p;
+                    break;
+                }
+            }
+            if (!sampleSize) {
+                // Otherwise check <= 8
+                for (uint32_t p = 8; p > 1; p--) {
+                    if (n_sensors % p == 0) {
+                        sampleSize = p;
+                        break;
+                    }
+                }
+                sampleSize = sampleSize ? sampleSize : n_sensors;
+            }
+            sampleSize = sampleSize ? sampleSize : n_sensors;
+            Log(LogLevel::Warn,
+                "The number of sensors should be divisible by reused samples count! Setting %d instead.", sampleSize);
+        }
+        
+        std::unique_ptr<SampleData[]> sampleData(new SampleData[sampleSize]);
         Timer timer;
         // Potentially render multiple passes
         for (size_t i = 0; i < n_passes; i++) {
             ref<Sampler> sampler_ref;
             Sampler *sampler_i = sampler;
             // Optimization to greatly reduce memory usage
-            if(independent){
+            if (independent) {
                 UInt32 sampler_seed = (spp_per_pass * i + seed);
-                //dr::make_opaque(sampler_seed);
-                sampler_ref = sampler->fork();
-                sampler_i = sampler_ref.get();
+                sampler_ref         = sampler->fork();
+                sampler_i           = sampler_ref.get();
                 sampler_i->seed(sampler_seed, wavefront_size);
             }
 
-            if (m_sa_reuse) {
-                render_multisample(scene, sensor, sampler_i, block, pos, sampleData.get());
+            if (reuse) {
+                render_multisample(scene, sensor, sampler_i, block, pos, sampleData.get(), sampleSize);
             } else {
                 render_sample(scene, sensor, sampler_i, block, pos);
             }
             // Evaluate each pass
             if (n_passes > 1) {
-                if(!independent){
+                if (!independent) {
                     sampler_i->advance(); // Will trigger a kernel launch of size 1
                     sampler_i->schedule_state();
                 }
@@ -220,7 +246,8 @@ MI_VARIANT typename MVPT::TensorXf MVPT::render(Scene *scene, Sensor *init_senso
         }
 
         film->put_block(block);
-        bool measure_gen = !m_force_eval && n_passes == 1 && jit_flag(JitFlag::VCallRecord) && jit_flag(JitFlag::LoopRecord);
+        bool measure_gen =
+            !m_force_eval && n_passes == 1 && jit_flag(JitFlag::VCallRecord) && jit_flag(JitFlag::LoopRecord);
         if (measure_gen) {
             Log(Info, "Computation graph recorded. (took %.3f s)", 0.001f * timer.reset());
         }

@@ -1,17 +1,15 @@
+#pragma once
+
 // Heavily based on: http://jhnet.co.uk/articles/cpp_magic
 
-#pragma once
+#include <type_traits>
+
 #define FIRST(a, ...) a
 #define SECOND(a, b, ...) b
 
 #define EMPTY()
 
 #define EVAL(...) EVAL32(__VA_ARGS__)
-/* #define EVAL1024(...) EVAL512(EVAL512(__VA_ARGS__))
-#define EVAL512(...) EVAL256(EVAL256(__VA_ARGS__))
-#define EVAL256(...) EVAL128(EVAL128(__VA_ARGS__))
-#define EVAL128(...) EVAL64(EVAL64(__VA_ARGS__))
-#define EVAL64(...) EVAL32(EVAL32(__VA_ARGS__)) */
 #define EVAL32(...) EVAL16(EVAL16(__VA_ARGS__))
 #define EVAL16(...) EVAL8(EVAL8(__VA_ARGS__))
 #define EVAL8(...) EVAL4(EVAL4(__VA_ARGS__))
@@ -63,7 +61,7 @@
 #define _MAP() MAP
 #define _MAP_SEMI() MAP_SEMI
 #define EXPAND(...) __VA_ARGS__
-#include <type_traits>
+
 template <typename T>
 using baseType = std::remove_const_t<std::remove_reference_t<T>>;
 #define DECL(x) const baseType<decltype(x)>& x
@@ -73,15 +71,11 @@ using baseType = std::remove_const_t<std::remove_reference_t<T>>;
 
 #define MARK_USED(x) (void)x
 #define SILENCE(...) EVAL(MAP(MARK_USED, __VA_ARGS__))
-
 #define DECLARE(...) EVAL(MAP(DECL, __VA_ARGS__))
-#define EXPANDST(...) EVAL(MAP_SEMI(DECLVAL, __VA_ARGS__));
 #define DECLARE_REF(...) EVAL(MAP(DECL_REF, __VA_ARGS__))
 
 
 #define DR_IF(cond, args, true_fn, false_fn) \
-dr::if_stmt(std::make_tuple(EXPAND args), cond, [](DECLARE args){SILENCE(EXPAND args); EXPAND true_fn},  [](DECLARE args){SILENCE(EXPAND args); EXPAND false_fn})
-#define DR_IFST(cond, args, true_fn, false_fn) \
 dr::if_stmt(std::make_tuple(EXPAND args), cond, [](DECLARE args){SILENCE(EXPAND args); EXPAND true_fn},  [](DECLARE args){SILENCE(EXPAND args); EXPAND false_fn})
 
 #define DR_LOOP(args, cond, body) \
