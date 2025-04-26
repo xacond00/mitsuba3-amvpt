@@ -1,0 +1,89 @@
+@startuml
+
+abstract class Integrator {
+    - m_stop : bool
+    - m_timeout : float
+    - m_render_timer : Timer
+    - m_hide_emitters : bool
+    + render(Scene, Sensor) : TensorXf
+    + cancel() : void
+    + should_stop() : bool
+    + aov_names() : \nvector<string>
+}
+
+abstract class SamplingIntegrator {
+    - m_block_size : uint32_t
+    - m_samples_per_pass : uint32_t
+    + sample(Scene, Sampler, Ray3f, Medium, Float*, Mask) : \npair<Spectrum, Mask>
+    + render_block(Scene, Sensor, Sampler, ImageBlock, \nFloat*, uint32_t, uint32_t, uint32_t) : void
+    + render_sample(Scene, Sensor, Sampler, ImageBlock, \nFloat*, Vector2f, ScalarFloat, Mask) : void
+}
+
+abstract class MonteCarloIntegrator {
+    - m_max_depth : uint32_t
+    - m_rr_depth : uint32_t
+}
+
+abstract class Shape {
+    - m_bsdf : ref<BSDF>
+    - m_emitter : ref<Emitter>
+    - m_sensor : ref<Sensor>
+    + is_sensor() : bool
+    + is_mesh() : bool
+    + ray_test() : bool
+    + sample_direction(Interaction3f, Point2f, Mask) : \nDirectionSample3f
+}
+
+abstract class Endpoint {
+    - m_shape : Shape*
+    + sample_ray(Float, Float, Point2f, Point2f, Mask) : \npair<Ray3f, Spectrum>
+    + sample_direction(ref<Interaction3f>, Point2f, Mask) : \npair<DirectionSample3f, Spectrum>
+    + set_scene(const Scene*) : void
+}
+
+abstract class Sensor {
+    - m_film : ref<Film>
+    - m_sampler : ref<Sampler>
+    - m_resolution : ScalarVector2f
+    + sample_ray(Float, Float, Point2f, Point2f, Mask) : \npair<Ray3f, Spectrum>
+    + sample_direction(ref<Interaction3f>, Point2f, Mask) : \npair<DirectionSample3f, Spectrum>
+}
+
+class Scene {
+    - m_shapes : vector<ref<Shape>>
+    - m_sensors : vector<ref<Sensor>>
+    - m_integrator : ref<Integrator>
+    + ray_test(Ray3f, Mask) : Mask
+    + ray_intersect(Ray3f, uint32_t, Mask, Mask) : \nSurfaceInteraction3f
+}
+
+abstract class BSDF {
+    - m_flags : uint32_t
+    - m_components : uint32_t
+    + eval_diffuse_reflectance(SurfaceInteraction3f) : \nSpectrum
+    + eval_attribute_1(SurfaceInteraction3f, bool) : \nFloat
+    + flags(uint32_t) : uint32_t
+}
+
+abstract class Film {
+    - m_flags : uint32_t
+    - m_size : ScalarVector2u
+    - m_srf : ref<Texture>
+    + create_block(ScalarVector2u, bool, bool) : \nref<ImageBlock>
+    + develop(bool) : \nTensorXf
+    + prepare(vector<string>) : \nsize_t
+}
+
+Sensor *-- Film : has
+Scene *-- Shape : has  
+Scene *-- Sensor : has  
+Scene *-- Integrator : has  
+Integrator --> Scene : uses  
+Integrator --> Sensor : uses  
+Sensor -|> Endpoint : inherits  
+Shape *-- BSDF : has  
+Endpoint --> Shape : references  
+Integrator <|-- SamplingIntegrator : inherits  
+SamplingIntegrator <|-- MonteCarloIntegrator : inherits  
+
+@enduml

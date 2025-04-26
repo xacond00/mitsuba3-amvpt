@@ -1,4 +1,7 @@
 #pragma once
+/*---------------------------------------------------------------------------------------------*/
+/* Adaptive multiview path tracing; Bc. Ondrej Ac, FIT VUT Brno, 2025*/
+/*---------------------------------------------------------------------------------------------*/
 
 #include <mitsuba/core/object.h>
 #include <mitsuba/core/plugin.h>

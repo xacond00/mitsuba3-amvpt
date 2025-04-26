@@ -1,6 +1,6 @@
 #pragma once
 /*---------------------------------------------------------------------------------------------*/
-/*Bc. Ondrej Ac, FIT VUT Brno, 2025*/
+/* Adaptive multiview path tracing; Bc. Ondrej Ac, FIT VUT Brno, 2025*/
 /*---------------------------------------------------------------------------------------------*/
 #include <cstdint>
 #include <drjit/morton.h>
@@ -83,28 +83,10 @@ Author: Ondrej Ac (xacond00); VUT FIT, Czechia; @2024-2025.
 Note: Implementation split into multiple header files, as only single source file
 can be associated with a plugin. Results in few ugly hacks to hide compiler warnings.
 
-.. image::
-../../resources/data/docs/images/integrator/integrator_path_figure.png :width:
-95% :align: center
-
-
 .. note:: This integrator does not handle participating media
 .. note:: This integrator only works with MultiSensor instance
 .. note:: This integrator is not set up to work with autodiff
 .. note:: This integrator currently supports only cuda and llvm variants
-
-.. tabs::
-    .. code-tab::  xml
-        :name: path-integrator
-
-        <integrator type="path">
-            <integer name="max_depth" value="8"/>
-        </integrator>
-
-    .. code-tab:: python
-
-        'type': 'path',
-        'max_depth': 8
 
  */
 
@@ -174,9 +156,9 @@ public:
     };
 
     /**
-     * \brief Evaluate shared samples between cameras in group
+     * \brief Evaluate shared samples between cameras in groups
      */
-    std::pair<Mask, Mask> sample_multi(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
+    std::pair<Mask, Mask> sample_mvpt(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
                                        SampleData *samples, uint32_t n_samples, const Ray3f &p_ray,
                                        const Point2f &p_app, Mask active) const;
     /**
@@ -240,6 +222,8 @@ public:
                            m_spp_pass_lim);
     }
 
+    // Test sensor visibility
+    // Returns direction sample, partial Jacobian term and visibility flag 
     template <bool primary>
     static auto sensors_visible(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor,
                                 const Point2f &ap_sample, const SurfaceInteraction3f &si, Bool prim_face,

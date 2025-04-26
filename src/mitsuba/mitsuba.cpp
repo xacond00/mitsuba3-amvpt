@@ -1,3 +1,7 @@
+/*---------------------------------------------------------------------------------------------*/
+/* Adaptive multiview path tracing; Bc. Ondrej Ac, FIT VUT Brno, 2025*/
+/*---------------------------------------------------------------------------------------------*/
+
 #include "mitsuba_render.h"
 #include "program.h"
 int main(int argc, char *argv[]) {

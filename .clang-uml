@@ -1,0 +1,22 @@
+compilation_database_dir: build
+output_directory: uml
+
+diagrams:
+  mitsuba_class_diagram:
+    type: class
+    glob:
+      - "/home/drew/Desktop/mitsuba3-amvpt/src/render/*.cpp"
+    include:
+      namespaces:
+        - mitsuba
+      subclasses:
+        - Integrator
+        - Sensor
+        - Scene
+    exclude:
+      namespaces:
+        - std
+        - boost
+        - mitsuba::ext
+        - mitsuba::detail
+

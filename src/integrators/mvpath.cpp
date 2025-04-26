@@ -1,3 +1,7 @@
+/*---------------------------------------------------------------------------------------------*/
+/* Adaptive multiview path tracing; Bc. Ondrej Ac, FIT VUT Brno, 2025*/
+/*---------------------------------------------------------------------------------------------*/
+
 #include "mvpath.h"
 #include "mvpath_multi.h"
 #include "mvpath_single.h"
@@ -51,6 +55,7 @@ MI_VARIANT typename MVPT::TensorXf MVPT::render(Scene *scene, Sensor *init_senso
     m_render_timer.reset();
 
     TensorXf result;
+    // Scalar implementation (No AMVPT)
     if constexpr (!dr::is_jit_v<Float>) {
         // Render on the CPU using a spiral pattern
         uint32_t n_threads = (uint32_t) Thread::thread_count();

@@ -1,3 +1,7 @@
+/*---------------------------------------------------------------------------------------------*/
+/* Adaptive multiview path tracing; Bc. Ondrej Ac, FIT VUT Brno, 2025*/
+/*---------------------------------------------------------------------------------------------*/
+
 #include <mitsuba/core/fwd.h>
 #include <mitsuba/core/properties.h>
 #include <mitsuba/render/fwd.h>

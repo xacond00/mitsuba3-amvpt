@@ -1,3 +1,9 @@
+/*---------------------------------------------------------------------------------------------*/
+/* Adaptive multiview path tracing; Bc. Ondrej Ac, FIT VUT Brno, 2025*/
+/*---------------------------------------------------------------------------------------------*/
+// Close to stock implementation in original mitsuba.cpp
+// Added one CLI argument
+
 #include "mitsuba_render.h"
 #include <mitsuba/core/argparser.h>
 #include <mitsuba/core/filesystem.h>

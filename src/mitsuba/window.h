@@ -1,4 +1,8 @@
 #pragma once
+/*---------------------------------------------------------------------------------------------*/
+/* Adaptive multiview path tracing; Bc. Ondrej Ac, FIT VUT Brno, 2025*/
+/*---------------------------------------------------------------------------------------------*/
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <functional>

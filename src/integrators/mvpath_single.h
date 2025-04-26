@@ -1,4 +1,7 @@
 #pragma once
+/*---------------------------------------------------------------------------------------------*/
+/* Adaptive multiview path tracing; Bc. Ondrej Ac, FIT VUT Brno, 2025*/
+/*---------------------------------------------------------------------------------------------*/
 
 // This is a 'hack' to get around the plugin system being limited to single source file per plugin 
 // You can safely ignore this file, as it is pretty much 1 to 1 copy of original integrator
@@ -6,6 +9,7 @@
 #include "mvpath.h"
 NAMESPACE_BEGIN(mitsuba)
 
+// Stock implementation
 MI_VARIANT void MVPT::render_block_(const Scene *scene, const Sensor *sensor,
                                                                  Sampler *sampler, ImageBlock *block,
                                                                  uint32_t sample_count, UInt32 seed,
@@ -47,6 +51,7 @@ MI_VARIANT void MVPT::render_block_(const Scene *scene, const Sensor *sensor,
     }
 }
 
+// Stock implementation
 MI_VARIANT void MVPT::render_sample(const Scene *scene, const Sensor *sensor,
                                                                  Sampler *sampler, ImageBlock *block,
                                                                  const Vector2f &pos, Mask active) const {

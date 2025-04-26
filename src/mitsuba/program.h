@@ -1,4 +1,7 @@
 #pragma once
+/*---------------------------------------------------------------------------------------------*/
+/* Adaptive multiview path tracing; Bc. Ondrej Ac, FIT VUT Brno, 2025*/
+/*---------------------------------------------------------------------------------------------*/
 #include "mi_args.h"
 #include "mitsuba/core/filesystem.h"
 #include "preset.h"

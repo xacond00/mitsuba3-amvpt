@@ -1,5 +1,9 @@
 #include "window.h"
 
+/*---------------------------------------------------------------------------------------------*/
+/* Adaptive multiview path tracing; Bc. Ondrej Ac, FIT VUT Brno, 2025*/
+/*---------------------------------------------------------------------------------------------*/
+
 namespace mitsuba {
 
 Window::Window(const char *title, uint32_t width, uint32_t height, SDL_PixelFormat format,

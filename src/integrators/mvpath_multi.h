@@ -1,4 +1,7 @@
 #pragma once
+/*---------------------------------------------------------------------------------------------*/
+/* Adaptive multiview path tracing; Bc. Ondrej Ac, FIT VUT Brno, 2025*/
+/*---------------------------------------------------------------------------------------------*/
 
 // This being a header, is a 'hack' to get around the plugin system being limited to single source file per plugin
 #include "dr_macros.h"
@@ -33,14 +36,14 @@ MI_VARIANT void MVPT::render_multisample(const Scene *scene, const MultiSensor<F
     for (uint s = 0; s < n_samples; s++) {
         UInt32 idx    = p_idx + s;
         sampleData[s] = dr::zeros<SampleData>();
-        // Camera index for given sample is (primary_idx + s) % n_sensors
+        // Camera indices for given sample 
         sampleData[s].idx = dr::select(idx < max_idx, idx, idx - n_samples);
     }
 
     sampleData[0].pos = sample_pos;
     // Adaptive doesn't work on translucent materials for some reason, that's what the mask is for
     auto [valid_ray, adapt_mask] =
-        sample_multi(scene, sensor, sampler, sampleData, n_samples, ray, aperture_sample, active);
+        sample_mvpt(scene, sensor, sampler, sampleData, n_samples, ray, aperture_sample, active);
     Float alpha         = dr::select(valid_ray, Float(1.f), Float(0.f));
     ScalarVector2u grid = sensor->grid_dim();
     ScalarVector2u sres = film->size() / grid;
@@ -62,7 +65,7 @@ MI_VARIANT void MVPT::render_multisample(const Scene *scene, const MultiSensor<F
         auto &sample = sampleData[i];
         if (dr::none_or<false>(sample.valid))
             continue;
-        if (i > 0) {
+        if (i > 0) { // Compute individual view offsets on film
             auto [y, x] = dr::idivmod(sample.idx, grid[0]);
             if (rev_x)
                 x = (grid[0] - 1) - x;
@@ -101,10 +104,10 @@ MI_VARIANT void MVPT::render_multisample(const Scene *scene, const MultiSensor<F
                 adjusted_pos = dr::fmadd(sample_pos, scale, offset);
                 // We need to rebuild all rays, otherwise memory consumption goes off the roof
                 auto [ray, ray_weight] = sensor->sample_ray(time, wavelength_sample, adjusted_pos, aperture_sample);
-                // If we do this inside sample_multi(), we can reuse primary hit and other data, BUT:
+                // If we do this inside sample_mvpt(), we can reuse primary hit and other data, BUT:
                 //      a) Gathering primary SurfaceInteraction is memory expensive (10x the normal)
                 //      b) Kernel with different size is launched directly inbetween other kernel
-                //      c) It's much slower - by 50%
+                //      c) It's much slower anyways - by 50%
                 auto [spec, valid] = sample_single(scene, sampler2.get(), ray, true);
                 // if (m_force_eval)
                 //     dr::eval(spec);
@@ -128,7 +131,7 @@ MI_VARIANT void MVPT::render_multisample(const Scene *scene, const MultiSensor<F
 // 6) Save the radiance to each sample
 
 MI_VARIANT std::pair<typename MVPT::Mask, typename MVPT::Mask>
-MVPT::sample_multi(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
+MVPT::sample_mvpt(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
                    SampleData *samples, uint32_t n_samples, const Ray3f &p_ray, const Point2f &p_app,
                    Mask active) const {
     Mask adapt_mask = false;
@@ -368,6 +371,8 @@ MVPT::sample_multi(const Scene *scene, const MultiSensor<Float, Spectrum> *senso
     return { valid_ray, adapt_mask };
 }
 
+
+
 MI_VARIANT void MVPT::camera_selection(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
                                        SampleData *samples, uint n_samples, const SurfaceInteraction3f &si,
                                        SurfaceInteraction3f &si_k, const BSDFData &bsdf, const Vector3f &wo,
@@ -463,6 +468,7 @@ MI_VARIANT void MVPT::camera_selection(const Scene *scene, const MultiSensor<Flo
     direct_pdf /= n_direct;
 }
 
+
 MI_VARIANT void MVPT::mis_weights(SampleData *samples, uint n_sensors, SurfaceInteraction3f &si_k,
                                   const BSDFData &bsdf_data) const {
     for (uint32_t k = 0; k < n_sensors; k++) {
@@ -522,6 +528,8 @@ MI_VARIANT void MVPT::mis_weights(SampleData *samples, uint n_sensors, SurfaceIn
     }
 }
 
+
+
 /*Nearly stock PathIntegrator Mitsuba 3 implementation*/
 MI_VARIANT std::pair<Spectrum, typename MVPT::Bool> MVPT::sample_suffix(const Scene *scene, Sampler *sampler,
                                                                         const PrefixData &pd) const {
@@ -535,12 +543,6 @@ MI_VARIANT std::pair<Spectrum, typename MVPT::Bool> MVPT::sample_suffix(const Sc
 
     BSDFContext bsdf_ctx;
 
-    /* Set up a Dr.Jit loop. This optimizes away to a normal loop in scalar
-       mode, and it generates either a a megakernel (default) or
-       wavefront-style renderer in JIT variants. This can be controlled by
-       passing the '-W' command line flag to the mitsuba binary or
-       enabling/disabling the JitFlag.LoopRecord bit in Dr.Jit.
-    */
     Spectrum result = 0.f;
     struct LoopState {
         Ray3f ray;
@@ -559,6 +561,7 @@ MI_VARIANT std::pair<Spectrum, typename MVPT::Bool> MVPT::sample_suffix(const Sc
                      valid_ray, sampler)
     } ls = { pd.ray,      pd.throughput, result,    pd.eta, pd.depth, pd.si,
              pd.bsdf_pdf, pd.bsdf_delta, pd.active, false,  sampler };
+    // Setup looop state from given prefix data
 
     dr::tie(ls) = dr::while_loop(
         dr::make_tuple(ls), [](const LoopState &ls) { return ls.active; },

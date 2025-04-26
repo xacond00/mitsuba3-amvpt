@@ -94,9 +94,10 @@ public:
      * \brief Computes 'sample_direction' but with correct pdf (not importance) with
      * respect to the sampled camera direction + additional "semi-jacobian" term, that
      * can later be used in jacobian determinant computation between multiple views
-     * J = J1 / J2
+     * J = Jp1 / Jp2
      * For now it only suits the pinhole and thinlens camera models, however can be
      * modified to account for more complicated models in the future.
+     * Mod by Ondrej Ac @2025
      * 
      * \param ref
      *    A reference position somewhere within the scene.
@@ -262,6 +263,7 @@ protected:
  * the internal sub-sensor collection.
  *
  * \ingroup librender
+ * Created by Ondrej Ac @2025
  */
  template <typename Float, typename Spectrum>
  class MI_EXPORT_LIB MultiSensor : public Sensor<Float, Spectrum> {

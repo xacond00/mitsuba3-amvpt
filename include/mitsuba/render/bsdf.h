@@ -592,6 +592,7 @@ public:
      * \brief Evaluate BSDF's roughness at a surface.
      * Returns 1 for diffuse, 0 for specular and (0,1) for others.
      * For anisotropic materials returns vector length, normalized by sqrt(2).
+     * Mod by Ondrej Ac @2025
     */
     virtual Float eval_roughness(const SurfaceInteraction3f&, Mask)const{return 0.f;}
 

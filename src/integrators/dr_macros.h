@@ -1,6 +1,9 @@
 #pragma once
+/*---------------------------------------------------------------------------------------------*/
+/* Adaptive multiview path tracing; Bc. Ondrej Ac, FIT VUT Brno, 2025*/
+/*---------------------------------------------------------------------------------------------*/
 
-// Heavily based on: http://jhnet.co.uk/articles/cpp_magic
+// Based on: http://jhnet.co.uk/articles/cpp_magic
 
 #include <type_traits>
 
