@@ -2,10 +2,9 @@
 /*---------------------------------------------------------------------------------------------*/
 /* Adaptive multiview path tracing; Bc. Ondrej Ac, FIT VUT Brno, 2025*/
 /*---------------------------------------------------------------------------------------------*/
-
-// Based on: http://jhnet.co.uk/articles/cpp_magic
-
 #include <type_traits>
+
+// Macros From: https://github.com/18sg/uSHET/blob/master/lib/cpp_magic.h
 
 #define FIRST(a, ...) a
 #define SECOND(a, b, ...) b
@@ -52,19 +51,20 @@
   IF_ELSE(HAS_ARGS(__VA_ARGS__))(    \
     , DEFER2(_MAP)()(m, __VA_ARGS__)   \
   )(                                 \
-    /* Do nothing, just terminate */ \
+    /* Terminate */ \
   )
 #define MAP_SEMI(m, first, ...)           \
   m(first)                           \
   IF_ELSE(HAS_ARGS(__VA_ARGS__))(    \
     ; DEFER2(_MAP_SEMI)()(m, __VA_ARGS__)   \
   )(                                 \
-    /* Do nothing, just terminate */ \
+    /* Terminate */ \
   )
 #define _MAP() MAP
 #define _MAP_SEMI() MAP_SEMI
 #define EXPAND(...) __VA_ARGS__
 
+// AMVPT specific macros
 template <typename T>
 using baseType = std::remove_const_t<std::remove_reference_t<T>>;
 #define DECL(x) const baseType<decltype(x)>& x
@@ -73,13 +73,16 @@ using baseType = std::remove_const_t<std::remove_reference_t<T>>;
 #define DECLVAL(x) std::decay<decltype(x)> x
 
 #define MARK_USED(x) (void)x
+// Mark parm list as used
 #define SILENCE(...) EVAL(MAP(MARK_USED, __VA_ARGS__))
+// Declare as variable list with types
 #define DECLARE(...) EVAL(MAP(DECL, __VA_ARGS__))
+// Non const version
 #define DECLARE_REF(...) EVAL(MAP(DECL_REF, __VA_ARGS__))
 
-
+// Macro for cleaner dr::if_stmt
 #define DR_IF(cond, args, true_fn, false_fn) \
 dr::if_stmt(std::make_tuple(EXPAND args), cond, [](DECLARE args){SILENCE(EXPAND args); EXPAND true_fn},  [](DECLARE args){SILENCE(EXPAND args); EXPAND false_fn})
-
+// Macro for cleaner dr::while_loop
 #define DR_LOOP(args, cond, body) \
 dr::while_loop(std::make_tuple(EXPAND args), [](DECLARE args){SILENCE(EXPAND args); EXPAND cond}, [](DECLARE_REF args){SILENCE(EXPAND args); EXPAND body})

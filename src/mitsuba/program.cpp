@@ -54,6 +54,7 @@ void Program::imgui_menu() {
     SetNextWindowSize({ (float) m_menu.width(), (float) m_menu.height() });
 
     Begin("Menu", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar);
+
     if (CollapsingHeader("Rendering menu")) {
         if (Button("Render !")) {
             mitsuba_render();
@@ -64,7 +65,7 @@ void Program::imgui_menu() {
         args_changed |= InputText("Scene", &m_args.scene);
         args_changed |= SliderInt("Spp", &m_args.spp, 0, 16384, "%d");
         args_changed |= InputText("Variant", &m_args.variant);
-        args_changed |= InputText("Output", &m_args.output);
+        args_changed |= InputText("Output name", &m_args.output);
         args_changed |= InputText("Args", &m_args.extra);
         args_changed |= SliderInt("Optim. level", &m_args.Olvl, 0, 5);
         // int spp
@@ -75,9 +76,10 @@ void Program::imgui_menu() {
         Text("%s", m_args.args.c_str());
         PopTextWrapPos();
     }
-    if (CollapsingHeader("Viewing menu")) {
-        // Preset{ "LKG 4x8", -0.4f, 0.05f, 354.678f, -0.112f, 0.00013f, 1.f, 1.f, 4, 8 };
 
+    Separator();
+
+    if (CollapsingHeader("Viewing menu")) {
         bool load_im = InputText("##load_img", &m_image_path, ImGuiInputTextFlags_EnterReturnsTrue);
         SameLine();
         load_im |= Button("Load##img");
@@ -127,7 +129,7 @@ void Program::imgui_menu() {
             }
         }
         SameLine();
-        if (Button("Export original quilt") && path_good) {
+        if (Button("Export quilt to PNG") && path_good) {
             export_quilt();
         }
         m_update_view |= load_im;
@@ -135,10 +137,14 @@ void Program::imgui_menu() {
         SameLine();
         m_update_view |= Checkbox("Nearest scaling", &m_nearest);
     }
+    
+    Separator();
+    
     if (CollapsingHeader("Presets menu")) {
+        Text("Database:"), SameLine();
         if (Button("Import##presets")) {
             auto result = Preset::import_file("presets.csv");
-            if(!result.empty()){
+            if (!result.empty()) {
                 std::swap(result, m_presets);
             }
         }
@@ -150,7 +156,9 @@ void Program::imgui_menu() {
         if (Button("Merge##presets")) {
             Preset::merge_file(m_presets, "presets.csv");
         }
-        if (ImGui::BeginListBox("##Preset list")) {
+        Text("%s", Preset::line_header());
+        float height = ImGui::GetTextLineHeightWithSpacing() * std::min(m_presets.size(), 10UL);
+        if (ImGui::BeginListBox("##Preset list", ImVec2(-1, height))) {
             for (uint32_t i = 0; i < m_presets.size(); i++) {
                 std::string name = std::string(m_presets[i]);
                 bool is_selected = (m_sel_pres == i);
@@ -166,6 +174,29 @@ void Program::imgui_menu() {
             }
             ImGui::EndListBox();
         }
+        /*
+        { // Table format overflows -> not used currently
+            auto header = m_preset.table_header();
+            if (ImGui::BeginTable("CSV Table", header.size(), ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+                //ImGui::TableSetupScrollFreeze(0,1); // freeze header row
+                for (size_t col = 0; col < header.size(); ++col) {
+                    ImGui::TableSetupColumn(header[col].c_str());
+                }
+                ImGui::TableHeadersRow();
+
+                for (size_t row = 0; row < m_presets.size(); ++row) {
+                    ImGui::TableNextRow();
+                    for (size_t col = 0; col < header.size(); ++col) {
+                        auto items = m_preset.table_row();
+                        ImGui::TableSetColumnIndex(col);
+                        ImGui::TextUnformatted(items[col].c_str());
+                    }
+                }
+
+                ImGui::EndTable();
+            }
+        }*/
+        Text("Preset:"), SameLine();
         if (Button("Load##preset") && m_sel_pres < m_presets.size()) {
             m_update_view    = true;
             m_default_preset = m_preset = m_presets[m_sel_pres];
@@ -182,7 +213,7 @@ void Program::imgui_menu() {
         SameLine();
         if (Button("Erase##preset") && m_sel_pres < m_presets.size()) {
             m_presets.erase(m_presets.begin() + m_sel_pres);
-            if(m_sel_pres == m_presets.size()){
+            if (m_sel_pres == m_presets.size()) {
                 m_sel_pres--;
             }
         }
@@ -194,9 +225,30 @@ void Program::imgui_menu() {
         m_update_view |= SliderFloat("Subp", &m_preset.subp, -1e-3f, 1e-3f, "%.4e");
         m_update_view |= SliderFloat2("View", m_preset.view, 0, 1);
         m_update_view |= SliderInt2("Grid", m_preset.grid, 1, 32);
+        m_update_view |= Checkbox("Flip RGB", &m_preset.flip_rgb);
     }
-    Text("%.2f fps", (double) GetIO().Framerate);
-    // SliderFloat("Float", &m_data.tmp, 0, 100);
+    
+    Separator();
+    
+    if (CollapsingHeader("Misc")) {
+        if (SliderInt("Theme", &m_theme, 0, 2, theme_str())) {
+            switch (m_theme) {
+                case 0:
+                    ImGui::StyleColorsDark();
+                    break;
+                case 1:
+                    ImGui::StyleColorsLight();
+                    break;
+                default:
+                    ImGui::StyleColorsClassic();
+                    break;
+            }
+        }
+        Text("%.2f fps", (double) GetIO().Framerate);
+    }
+    
+    Separator();
+    
     End();
 }
 
@@ -235,7 +287,9 @@ void Program::display_image(bool screenshot) {
     uint32_t threads = std::thread::hardware_concurrency();
     threads          = threads > 0 ? threads : 4;
     uint block_size  = std::max(dst_dim[1] / threads, 1U);
-
+    
+    // Interlacing algorithm inspired by: https://git.fit.vutbr.cz/imilet/FitGraphics/src/branch/master/src/LKG/
+    // Parallel CPU for loop, needs scalar JIT instance to be running
     dr::parallel_for(dr::blocked_range<size_t>(0, dst_dim[1], block_size), [&](const dr::blocked_range<size_t> &range) {
         for (uint32_t dy = range.begin(); dy < range.end(); dy++) {
             float y0 = dy * dst_scl[1];
@@ -272,7 +326,15 @@ void Program::display_image(bool screenshot) {
     });
 
     if (screenshot && img) {
-        img->write(fs::path(m_export_path));
+        if (m_export_path == m_image_path) {
+            Log(Warn, "Can't overwrite source image !");
+        }
+        auto path = fs::path(m_export_path);
+        if (fs::exists(path.parent_path())) {
+            Log(Info, "Image saved to: %s", path);
+        } else {
+            Log(Warn, "Path doesn't exist !");
+        }
     } else if (m_update_view) {
         m_view.set_surf();
     }

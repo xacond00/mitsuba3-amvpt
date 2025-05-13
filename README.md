@@ -5,7 +5,7 @@ alt="Mitsuba banner">
 
 # Mitsuba Renderer 3 - Unofficial AMVPT Extension
 ## Diplomová práce
-### Ondřej Áč, xacond00
+### Bc. Ondřej Áč (xacond00)
 Compilation and execution guide:
 ```shell
 mkdir build && cd build

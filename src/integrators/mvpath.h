@@ -80,13 +80,38 @@ Reusing parts of Mitsuba 3 stock source code (PathIntegrator,SamplingIntegrator)
 Based on: https://bfraboni.github.io/mvpt19/index.html.
 Author: Ondrej Ac (xacond00); VUT FIT, Czechia; @2024-2025.
 
-Note: Implementation split into multiple header files, as only single source file
+Note: Implementation is split into multiple header files, as only single source file
 can be associated with a plugin. Results in few ugly hacks to hide compiler warnings.
+
+Note: Over the idealized approach in thesis, this implementation is much more complicated.
+The main problem being, needing to keep track of surface interaction and bsdf data in order
+to repeatedly evaluate the sampled BSDF. This results in variables like: si_k, rand, bsdf_sample,
+being used all over the place, with one too many input parameters in all functions.
+
+Note: The MVPT sampling method is built with extra non-MIS sampling option in mind.
+In many cases this just means an extra "else" statement, but it affects general structure too.
+For example bsdf_sample.pdf is used to keep track of mixture pdf in MIS case
+and singular BSDF pdf of reflection in non-MIS case.
 
 .. note:: This integrator does not handle participating media
 .. note:: This integrator only works with MultiSensor instance
 .. note:: This integrator is not set up to work with autodiff
 .. note:: This integrator currently supports only cuda and llvm variants
+
+.. tabs::
+    .. code-tab:: xml
+        :name: mvpath
+    <integrator type="mvpath">
+		<integer name="spp_pass_lim" value="32"/>
+		<integer name="max_depth" value="20" />
+		<boolean name="sa_reuse" value="true" />
+		<integer name="reuse_count" value="16" />
+		<boolean name="sa_mis" value="true" />
+		<boolean name="force_eval" value="true" />
+		<boolean name="fast_mis" value="true" />
+		<integer name="adaptive" value="0" />
+		<boolean name="debug" value="false" />
+	</integrator>
 
  */
 
@@ -100,14 +125,14 @@ public:
     MI_IMPORT_TYPES(Scene, Sensor, Film, BSDF, BSDFPtr, ImageBlock, Sampler, Medium, Emitter, EmitterPtr, SensorPtr)
 
     MVPathIntegrator(const Properties &props) : Base(props) {
-        m_sa_reuse     = props.get<bool>("sa_reuse", false);
-        m_force_eval   = props.get<bool>("force_eval", true);
-        m_sa_mis       = props.get<bool>("sa_mis", false);
-        m_debug        = props.get<bool>("debug", false);
-        m_adaptive     = props.get<uint32_t>("adaptive", 0);
-        m_fast_mis     = props.get<bool>("fast_mis", false);
         m_spp_pass_lim = props.get<uint32_t>("spp_pass_lim", 16);
-        m_reuse_count  = props.get<uint32_t>("reuse_count", 1);
+        m_reuse_count  = props.get<uint32_t>("reuse_count", 0);
+        m_adaptive     = props.get<uint32_t>("adaptive", 0);
+        m_sa_reuse     = props.get<bool>("sa_reuse", true);
+        m_force_eval   = props.get<bool>("force_eval", true);
+        m_sa_mis       = props.get<bool>("sa_mis", true);
+        m_fast_mis     = props.get<bool>("fast_mis", true);
+        m_debug        = props.get<bool>("debug", false);
     }
 
     TensorXf render(Scene *scene, Sensor *init_sensor, UInt32 seed, uint32_t init_spp, bool develop,
@@ -129,25 +154,26 @@ public:
         DRJIT_STRUCT(PrefixData, ray, si, throughput, bsdf_pdf, eta, depth, bsdf_delta, active);
     };
 
+    // The notation is more so consistent with Mitsuba than the thesis
     struct SampleData {
         Spectrum result; // First hit radiance
-        // Temporary bsdf reflectance (for direct and indirect radiance)
+        // Temporary bsdf reflectance (for direct and later indirect radiance)
         Spectrum bsdf_val;
         Vector3f wi;   // Incoming surface direction
-        Vector3f wo_r; // Reflected surface direction
+        Vector3f wr;   // Mirror reflected direction
         Vector2f pos;  // Raster position
         Float weight;  // Final weight
-        Float pdfM;    // Precomputed material pdf
+        Float pdfM;    // Precomputed material pdf (or just CT^2)
         Float pdf;     // Pdf of this view
         Float pdf_lk;  // Pdf from primary to this view
         Float Jp, iJp; // Partial Jacobian term and its inverse
         UInt32 idx;    // Sensor index
         Mask indirect; // Sample indirect lighting ?
         Mask valid;    // Is visible, has same material ?
-        DRJIT_STRUCT(SampleData, result, bsdf_val, wi, wo_r, pos, weight, pdfM, pdf, pdf_lk, Jp, iJp, idx, indirect,
+        DRJIT_STRUCT(SampleData, result, bsdf_val, wi, wr, pos, weight, pdfM, pdf, pdf_lk, Jp, iJp, idx, indirect,
                      valid);
     };
-
+    // Structure for storing sampled BSDF data, in order to be used in TV computation (and others)
     struct BSDFData {
         BSDFPtr bsdf;
         Float alpha, sqr_a, rsqrt_a;
@@ -159,12 +185,12 @@ public:
      * \brief Evaluate shared samples between cameras in groups
      */
     std::pair<Mask, Mask> sample_mvpt(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
-                                       SampleData *samples, uint32_t n_samples, const Ray3f &p_ray,
-                                       const Point2f &p_app, Mask active) const;
+                                      SampleData *samples, uint32_t n_samples, const Ray3f &p_ray, const Point2f &p_app,
+                                      Mask active) const;
     /**
      * \brief Renders scene from primary sensor and reuses samples in other sensors
      */
-    void render_multisample(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
+    void render_amvpt(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
                             ImageBlock *block, const Vector2f &pos, SampleData *sampleData, uint32_t n_samples,
                             Mask active = true) const;
     /**
@@ -183,10 +209,11 @@ public:
      *
      * \return Nothing, as &bsdf_sample and &direct_pdf are modified directly
      */
-    void camera_selection(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
-                          SampleData *samples, uint n_samples, const SurfaceInteraction3f &si, SurfaceInteraction3f &si_k, const BSDFData &bsdf,
-                          const Vector3f &wo, const Point2f &p_app, const Point2f &rand_2, const Float &rand_1,
-                          const Bool &p_hit, BSDFSample3f &bsdf_sample, Float &direct_pdf) const;
+    void select_views(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
+                          SampleData *samples, uint n_samples, const SurfaceInteraction3f &si,
+                          SurfaceInteraction3f &si_k, const BSDFData &bsdf, const Vector3f &wo, const Point2f &p_app,
+                          const Point2f &rand_2, const Float &rand_1, const Bool &p_hit, BSDFSample3f &bsdf_sample,
+                          Float &direct_pdf) const;
     // Given a primary intersection data (prefix), sample suffix
     // Returns spectrum and mask
     // Nearly identical to sample_single
@@ -223,7 +250,7 @@ public:
     }
 
     // Test sensor visibility
-    // Returns direction sample, partial Jacobian term and visibility flag 
+    // Returns direction sample, partial Jacobian term and visibility flag
     template <bool primary>
     static auto sensors_visible(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor,
                                 const Point2f &ap_sample, const SurfaceInteraction3f &si, Bool prim_face,
@@ -238,44 +265,42 @@ public:
         }
         return std::tuple(sensor_ds, Jp, valid);
     }
-    // Fast TV distance approximation based on plugging GGX formula into TV distance calculation
-    // Very accurate if the BSDF has GGX distribution, less so for Beckmann, but not too terrible...
-    static Float tv_pdf_fast(const Vector3f &wo_l, const Vector3f &wi_k, const Float &p_k, const BSDFData &bsdf,
-                             const Mask &active) {
-        auto p_l = dr::square(Frame3f::cos_theta(dr::normalize(wi_k + wo_l)));
-        auto N   = dr::fmadd(bsdf.sqr_a, dr::maximum(p_k, p_l), 1.f);
-        auto D   = dr::fmadd(bsdf.sqr_a, dr::minimum(p_k, p_l), 1.f);
-        Float q  = dr::square(N * dr::rcp(D));
-        // Rational approximation to pow(p, 1/a)
-        Float p = dr::fmadd(q - 1.f, bsdf.rsqrt_a, 1.f);
-        p       = dr::square(dr::maximum(p, 0));
-        p       = dr::lerp(p, q, bsdf.alpha);
-        return dr::select(active, p, 0.f);
-    }
+
     // Compute total variation pdf of brdfs from L to K
     // Wo_l is reflection direction of primary camera (local)
     // Wi_k is incoming direction from secondary camera (local) in si_k
     // Pi_k is just precomputed pdf(wi_k, wo_k)
     // Alpha is material roughness
     static Float tv_pdf(const Vector3f &wo_l, const SurfaceInteraction3f &si_k, const Float &p_k, const BSDFData &bsdf,
-                        Mask active) {
-        active &= p_k > 0.f;
-        if (dr::none_or<false>(active))
-            return 0.f;
-        BSDFContext ctx(TransportMode::Radiance, (uint32_t) BSDFFlags::Glossy);
-        Float p_l = bsdf.bsdf->pdf(ctx, si_k, wo_l, active);
-        active &= p_l > 0.f;
-        Float p_max = dr::maximum(p_l, p_k);
-        Float p_min = dr::minimum(p_l, p_k);
-        // Intial pdf: q = 1 - TVD
-        Float q = p_min * dr::rcp(p_max);
-        // Piecewise polynomial approximation of p ^ (1 / a)
-        Float p = dr::fmadd(q - 1.f, bsdf.rsqrt_a, 1.f);
-        p       = dr::square(dr::maximum(p, 0));
-        p       = dr::lerp(p, q, bsdf.alpha);
-        return dr::select(active, p, 0.f);
-    }
+                        const Mask &_active, bool optimized = true) {
 
+        // Fast TV distance approximation based on plugging GGX formula into TV distance calculation
+        // Very accurate if the BSDF has GGX distribution, less so for Beckmann, but not too terrible...
+        if (optimized) {
+            auto p_l = dr::square(Frame3f::cos_theta(dr::normalize(si_k.wi + wo_l)));
+            auto N   = dr::fmadd(bsdf.sqr_a, dr::maximum(p_k, p_l), 1.f);
+            auto D   = dr::fmadd(bsdf.sqr_a, dr::minimum(p_k, p_l), 1.f);
+            Float q  = dr::square(N * dr::rcp(D));
+            // Polynomial approximation to pow(p, 1/a)
+            Float p = dr::fmadd(q - 1.f, bsdf.rsqrt_a, 1.f);
+            p       = dr::square(dr::maximum(p, 0));
+            p       = dr::lerp(p, q, bsdf.alpha);
+            return dr::select(_active, p, 0.f);
+        } else { // Normal "unoptimized" version
+            Mask active = _active & (p_k > 0.f);
+            if (dr::none_or<false>(active))
+                return 0.f;
+            static BSDFContext ctx(TransportMode::Radiance, (uint32_t) BSDFFlags::Glossy);
+            Float p_l = bsdf.bsdf->pdf(ctx, si_k, wo_l, active);
+            active &= p_l > 0.f;
+            Float p_max = dr::maximum(p_l, p_k);
+            Float p_min = dr::minimum(p_l, p_k);
+            // Intial pdf: p = 1 - TVD
+            Float p = p_min * dr::rcp(p_max);
+            p = dr::pow(p, dr::square(bsdf.rsqrt_a));            
+            return dr::select(active, p, 0.f);
+        }
+    }
     /**
      * \brief Perform a Mueller matrix multiplication in polarized modes, and a
      * fused multiply-add otherwise.
@@ -306,19 +331,19 @@ public:
         } else if constexpr (drjit::is_drjit_struct_v<Type>) {
             drjit::traverse_1(data.fields_(), [&idx](auto &el) { nested_gather(el, idx); });
         } else {
-            static_assert(false, "WTF");
+            static_assert(false, "Invalid input !");
         }
     }
 
     MI_DECLARE_CLASS()
     uint32_t m_spp_pass_lim;
+    uint32_t m_adaptive;
+    uint32_t m_reuse_count;
     bool m_sa_reuse;
     bool m_force_eval;
     bool m_sa_mis;
     bool m_fast_mis;
     bool m_debug;
-    uint32_t m_adaptive;
-    uint32_t m_reuse_count;
 };
 
 NAMESPACE_END(mitsuba)

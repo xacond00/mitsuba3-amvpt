@@ -17,6 +17,11 @@ Any wrapper (:monosp:`any`)
 .. pluginparameters::
 
  * - none
+
+ .. tabs::
+    .. code-tab:: xml
+        :name: any
+
 */
 
 MI_VARIANT class AnyWrap final : public Wrap<Float, Spectrum> {

@@ -5,6 +5,11 @@
 
 NAMESPACE_BEGIN(mitsuba)
 
+/*
+Rebased to MultiSensor
+Bc. Ondrej Ac, FIT VUT Brno, 2025
+*/
+
 /**!
 
 .. _sensor-batch:

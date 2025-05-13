@@ -4,10 +4,10 @@ skinparam classFontSize 24
 skinparam defaultFontSize 22
 left to right direction 
 abstract class Integrator {
-    - m_stop
-    - m_timeout
-    - m_render_timer
-    - m_hide_emitters
+    # m_stop
+    # m_timeout
+    # m_render_timer
+    # m_hide_emitters
     + render(Scene, Sensor)
     + cancel()
     + should_stop()
@@ -15,22 +15,22 @@ abstract class Integrator {
 }
 
 abstract class SamplingIntegrator {
-    - m_block_size
-    - m_samples_per_pass
+    # m_block_size
+    # m_samples_per_pass
     + sample()
     + render_block()
     + render_sample()
 }
 
 abstract class MonteCarloIntegrator {
-    - m_max_depth
-    - m_rr_depth
+    # m_max_depth
+    # m_rr_depth
 }
 
 abstract class Shape {
-    - m_bsdf
-    - m_emitter
-    - m_sensor
+    # m_bsdf
+    # m_emitter
+    # m_sensor
     + is_sensor()
     + is_mesh()
     + ray_test()
@@ -38,50 +38,49 @@ abstract class Shape {
 }
 
 abstract class Endpoint {
-    - m_shape
+    # m_shape
     + sample_ray()
     + sample_direction()
     + set_scene()
 }
 
 abstract class Sensor {
-    - m_film
-    - m_sampler
-    - m_resolution
+    # m_film
+    # m_sampler
+    # m_resolution
     + sample_ray()
     + sample_direction()
 }
 
 class Scene #lightblue {
-    - m_shapes
-    - m_sensors
-    - m_integrator
+    # m_shapes
+    # m_sensors
+    # m_integrator
     + ray_test()
     + ray_intersect()
 }
 
 abstract class BSDF {
-    - m_flags
-    - m_components
+    # m_flags
+    # m_components
     + eval_diffuse()
     + eval_attribute()
     + flags()
 }
 
 abstract class Film {
-    - m_flags
-    - m_size
-    - m_srf
+    # m_flags
+    # m_size
+    # m_srf
     + create_block()
     + develop()
     + prepare()
 }
 
 abstract class ProjectiveCamera {
-    - m_near_clip : ScalarFloat
-    - m_far_clip : ScalarFloat
-    - m_focus_distance : Float
-    - m_lens_shift : Float
+    # m_near_clip
+    # m_far_clip
+    # m_focus_distance 
 }
 
 Sensor <|-- ProjectiveCamera

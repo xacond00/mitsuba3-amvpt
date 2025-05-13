@@ -3,8 +3,9 @@ include_directories(
 )
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-add_subdirectory(gui)
+add_subdirectory(gui EXCLUDE_FROM_ALL)
 add_executable(mitsuba-bin mitsuba.cpp mitsuba_render.cpp window.cpp program.cpp)
+target_compile_options(mitsuba-bin PRIVATE -O3)
 target_link_libraries(mitsuba-bin PRIVATE mitsuba GUI)
 
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")

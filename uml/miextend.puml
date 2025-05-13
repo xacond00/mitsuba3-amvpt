@@ -1,0 +1,180 @@
+@startuml
+skinparam defaultFontName Arial
+skinparam classFontSize 24
+skinparam defaultFontSize 22
+
+abstract class MonteCarloIntegrator{
+    # m_max_depth
+    # m_rr_depth
+    + render(Scene, Sensor)
+}
+
+class MVPathIntegrator #lightyellow{
+    + m_spp_pass_lim : u32 
+    + m_adaptive : u32
+    + m_reuse_count : u32
+    + m_sa_reuse : bool
+    + m_sa_mis : bool
+    + m_fast_mis : bool
+    + m_force_eval : bool
+    + render(Scene, Sensor)
+    + render_amvpt(MultiSensor) 
+    + sample_mvpt(MultiSensor)
+    + select_views(MultiSensor)
+    + mis_weights(SampleData)
+    {static} sensors_visible(MultiSensor)
+    {static} tv_pdf() : Float
+}
+
+abstract class Shape {
+    # m_bsdf
+    + is_mesh()
+}
+
+abstract class Sensor {
+    # m_film
+    # m_sampler
+    # m_resolution
+    + sample_ray()
+    + sample_direction()
+    + sample_surface()
+}
+
+class Scene #lightblue {
+    # m_shapes
+    # m_sensors
+    # m_integrator
+    + ray_test()
+    + ray_intersect()
+}
+
+abstract class BSDF {
+    # m_flags
+    # m_components
+    + eval_diffuse()
+    + eval_attribute()
+    + eval_roughness()
+}
+
+abstract class MultiSensor #lightyellow {
+    + n_sensors()
+    + grid_dim()
+    + reverse_axis()
+    + sample_ray_idx() : Ray,U32
+}
+
+abstract class ProjectiveCamera {
+    # m_near_clip
+    # m_far_clip
+    # m_focus_distance : f32
+    # m_lens_shift : f32
+}
+
+class GridSensor #lightyellow{
+    - m_sensors : Sensor
+    - m_grid_dim
+    - m_cam_dir : Vec3f
+    - m_cone_deg : f32
+    - m_foc_dist : f32
+    - m_reverse : u32,u32
+    + n_sensors()
+    + grid_dim()
+    + reverse_axis()
+    + sample_ray_idx()
+    + sample_surface()
+}
+
+abstract class Wrap #lightyellow{
+    # m_props : Properties
+    # m_class_ptr : Class* 
+    # m_wrap_class : str
+    # m_wrap_type; : str
+    + wrap_class()
+    + wrap_type()
+    + properties()
+    + create_instance()
+}
+class AnyWrap #lightyellow{
+    
+}
+
+Sensor <|-- ProjectiveCamera
+Sensor <|-- MultiSensor
+MultiSensor <|-- GridSensor
+Wrap <|-- AnyWrap
+MonteCarloIntegrator <|-- MVPathIntegrator
+
+GridSensor *-- Sensor  
+Scene *-- Shape  
+Scene *-- Sensor
+Scene *-- MonteCarloIntegrator    
+Wrap .d.> Scene    
+MonteCarloIntegrator ..> Scene  
+MVPathIntegrator ..> MultiSensor
+Shape *-- BSDF  
+
+
+
+MultiSensor -[hidden]d-> GridSensor
+Scene -[hidden]l-> Wrap
+Scene -[hidden]d-> Shape
+Scene -[hidden]d-> Sensor
+Scene -[hidden]r-> MonteCarloIntegrator
+MonteCarloIntegrator -[hidden]r-> MVPathIntegrator
+
+MVPathIntegrator -[hidden]d-> MultiSensor
+
+MVPathIntegrator -[hidden]d-> MultiSensor
+Sensor -[hidden]r-> MultiSensor
+Wrap -[hidden]d-> AnyWrap
+AnyWrap -[hidden]r-> Shape
+ProjectiveCamera -[hidden]r-> GridSensor
+
+/'
+
+MultiSensor -[hidden]d-> GridSensor
+Scene -[hidden]l-> Wrap
+Scene -[hidden]d-> Shape
+Scene -[hidden]d-> Sensor
+Scene -[hidden]r-> MonteCarloIntegrator
+MonteCarloIntegrator -[hidden]r-> MVPathIntegrator
+
+MVPathIntegrator -[hidden]d-> MultiSensor
+
+MVPathIntegrator -[hidden]d-> MultiSensor
+Shape -[hidden]r-> Sensor
+Sensor -[hidden]r-> MultiSensor
+Wrap -[hidden]d-> AnyWrap
+AnyWrap -[hidden]r-> Shape
+BSDF -[hidden]r-> ProjectiveCamera
+ProjectiveCamera -[hidden]r-> GridSensor
+'/
+
+
+/'
+MultiSensor -[hidden]d-> GridSensor
+Scene -[hidden]d-> Wrap
+Scene -[hidden]d-> Shape
+Scene -[hidden]d-> Sensor
+Scene -[hidden]r-> MonteCarloIntegrator
+MVPathIntegrator -[hidden]d-> MultiSensor
+
+MVPathIntegrator -[hidden]d-> MultiSensor
+Wrap -[hidden]r-> Shape
+Shape -[hidden]r-> Sensor
+Sensor -[hidden]r-> MultiSensor
+Wrap -[hidden]d-> AnyWrap
+AnyWrap -[hidden]r-> BSDF
+BSDF -[hidden]r-> ProjectiveCamera
+ProjectiveCamera -[hidden]r-> GridSensor
+'/
+'GridSensor -[hidden]r-> Sensor'
+'Sensor -[hidden]r-> BSDF'
+'Sensor -[hidden]d-> GridSensor'
+'Sensor -[hidden]r-> MultiSensor'
+'Scene -[hidden]l-> Wrap'
+'GridSensor -[hidden]r-> MultiSensor'
+'MonteCarloIntegrator -[hidden]r-> MVPathIntegrator'
+
+
+@enduml

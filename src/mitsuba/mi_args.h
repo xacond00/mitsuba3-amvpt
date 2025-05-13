@@ -9,6 +9,7 @@
 #include "util.h"
 
 namespace mitsuba {
+    
 // Class to interface with CLI mitsuba::render() function.
 struct MiArgs {
     MiArgs(const std::string &prog_name = "mitsuba") : prog_name(prog_name) { update_args(); }
@@ -28,7 +29,7 @@ struct MiArgs {
     int spp     = 0;
     bool bitmap = true;
 
-    std::string get_output() const { return bitmap ? "tmp_img" : output; }
+    std::string get_output() const { return bitmap ? "tmp" : output; }
     // Updates args string from all parameters
     void update_args() {
         std::string out = get_output();

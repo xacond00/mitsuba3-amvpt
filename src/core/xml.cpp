@@ -76,6 +76,7 @@ inline std::string class_key(const std::string &name, const std::string &variant
     return name + "." + variant;
 }
 
+/* Adaptive multiview path tracing; Bc. Ondrej Ac, FIT VUT Brno, 2025*/
 const Class *find_class(const std::string &name, const std::string &variant){
     return tag_class->at(class_key(name, variant));
 }

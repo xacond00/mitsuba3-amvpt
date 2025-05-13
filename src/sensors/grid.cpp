@@ -39,43 +39,41 @@ sensor from single definition along a given axis.
     .. code-tab:: xml
         :name: grid-sensor
 
-        <sensor type="grid">
-            <integer name="grid_x" value="3" />
-            <vector name="cam_dir" value="1,0,0" />
-            <float name="cam_dist" value="0.2" />
-            <wrap type="any">
-                <string name="wrap_class" value="sensor"/>
-                <string name="wrap_type" value="perspective"/>
-                <float name="fov" value="45" />
-                <ref id="m_film"/>
-                <ref id="m_sampler"/>
-            </wrap>
-            <ref id="m_film"/>
-            <ref id="m_sampler"/>
-        </sensor>
+	<sensor type="grid">
+		<integer name="grid_x" value="4" />
+		<integer name="grid_y" value="4" />
+		<integer name="res_x" value="$resx" />
+		<integer name="res_y" value="$resy" />
+		<float name="cone_deg" value="20"/>
+		<!-- <vector name="cam_dir" value="1,0,0" />
+		<float name="cam_dist" value="0.8" />-->
 
-    .. code-tab:: python
+		<wrap type="any">
+			<string name="wrap_class" value="sensor" />
+			<string name="wrap_type" value="thinlens" />
+			<float name="focus_distance" value="50"/>
+			<float name="aperture_radius" value="0.1"/>
+			<float name="fov" value="60.0" />
+		</wrap>
 
-        'type': 'grid',
-        # Two perpendicular viewing directions
-        'sensor1': {
-            'type': 'perspective',
-            'fov': 45,
-            'to_world': mi.ScalarTransform4f.look_at(
-                origin=[0, 0, 1],
-                target=[0, 0, 0],
-                up=[0, 1, 0]
-            )
-        },
+		<wrap type="any">
+			<string name="wrap_class" value="sampler" />
+			<string name="wrap_type" value="independent" />
+			<integer name="sample_count" value="$spp" />
+		</wrap>
 
-        'film_id': {
-            'type': '<film_type>',
-            # ...
-        },
-        'sampler_id': {
-            'type': '<sampler_type>',
-            # ...
-        }
+		<wrap type="any">
+			<string name="wrap_class" value="film" />
+			<string name="wrap_type" value="hdrfilm" />
+			<string name="file_format" value="openexr" />
+			<string name="pixel_format" value="rgb" />
+		</wrap>
+		<!-- <vector name="cam_off" value="-5,0,0"/> -->
+		<transform name="to_world">
+			<matrix value="-0.993341 -0.0130485 -0.114467 4.44315 0 0.993565 -0.11326 16.9344 0.115208 -0.112506 -0.98695 49.9102 0 0 0 1" />
+		</transform>
+
+	</sensor>
 */
 
 MI_VARIANT class GridSensor final : public MultiSensor<Float, Spectrum> {
@@ -87,14 +85,14 @@ public:
 
     GridSensor(const Properties &props) : Base(props) {
         ScalarTransform4f to_world = Base::m_to_world.scalar();
-        /*Load camera distribution parameters*/
+        /*Load camera group parameters*/
         m_reverse  = std::pair<bool, bool>(props.get<bool>("reverse_x", false),
                                            props.get<bool>("reverse_y", true));
         m_grid_dim = ScalarVector2u(props.get<uint32_t>("grid_x", 1),
                                     props.get<uint32_t>("grid_y", 1));
         m_film_res = ScalarVector2u(props.get<uint32_t>("res_x", 0),
                                     props.get<uint32_t>("res_y", 0));
-
+        // If resolution wasn't defined, check film size
         m_film_res[0] =
             m_film_res[0] ? m_film_res[0] : m_film->size()[0] * m_grid_dim[0];
         m_film_res[1] =
@@ -103,6 +101,7 @@ public:
         if (m_film_res[0] % m_grid_dim[0] || m_film_res[1] % m_grid_dim[1])
             Throw("Film size must be divisible by grid dimensions !");
         auto sub_res = m_film_res / m_grid_dim;
+        // Subsensor aspect
         double sub_asp = sub_res.x() / double(sub_res.y());
         m_grid_size = m_grid_dim[0] * m_grid_dim[1];
         m_used_cone = false;
@@ -110,7 +109,7 @@ public:
 
         // Camera generation props
         if (props.has_property("cone_deg")) {
-            // Interpolate on a line based on angle with known focal plane
+            // Interpolate on a line based on angle of view cone with known focal plane
             m_used_cone = true;
             m_cone_deg = props.get<ScalarFloat>("cone_deg");
         } 
@@ -132,6 +131,7 @@ public:
             m_cam_dir  = ScalarVector3f(1, 0, 0);
             m_cam_dist = 0.1f;
         }
+        // Offset used to tune the camera's position in the relation to viewing direction
         m_cam_off = props.get<ScalarVector3f>("cam_off", ScalarVector3f(0,0,0));
         m_cam_off.y() = -m_cam_off.y();
         m_cam_off.z() = -m_cam_off.z();
@@ -178,18 +178,25 @@ public:
         sub_props.remove_property("focal_length");
         sub_props.set_float("fov", fov_x, false);
         sub_props.set_string("fov_axis", "x", false);
+        // Focus distance of camera is same with focal plane of view cone
+        // In general we wan't to focus the lens in the same plane
         sub_props.set_float("focus_distance", (double)m_foc_dist, false);
         // Set film and sampler identical to the one in the body
+        // Needs to be a wrap, otherwise the films are shared
         sub_props.set_object("film_wrap", w_film);
         sub_props.set_object("samp_wrap", w_samp);
         
         if(m_used_cone){
             for (uint32_t i = 0; i < m_grid_size; ++i) {
+                // Offset
                 ScalarFloat dt = i / ScalarFloat(m_grid_size - 1);
                 ScalarFloat tan_off = dr::tan((dt - 0.5f) * dr::deg_to_rad(m_cone_deg));
                 ScalarFloat offset = m_foc_dist * tan_off;
+                // Lens shift
                 double shift = 0.5 * double(tan_off) / dr::tan(dr::deg_to_rad(fov_x) * 0.5);
+                // The transform is actually inverse world = view^-1
                 auto itrafo = to_world.inverse_transpose;
+                // Either way shift the view matrix in the correct direction
                 itrafo.entry(3,0) += offset + m_cam_off.x();
                 itrafo.entry(3,1) += m_cam_off.y();
                 itrafo.entry(3,2) += m_cam_off.z();
@@ -197,12 +204,15 @@ public:
                 ScalarTransform4f trafo(ntrafo, itrafo);
                 //trafo.inverse_transpose = dr::inverse_transpose(trafo.matrix);
                 sub_props.set_transform("to_world", trafo, false);
+                // Lens shift is stored into the props (m_lens_shift)
+                // Used to shift the perspective matrix in subcamera constructor
                 sub_props.set_float("lens_shift", shift, false);
                 m_sensors.emplace_back(dynamic_cast<Sensor_t *>(w_sens->create_instance().get()));
                 Sensor_t* inst = m_sensors.back();
                 if(!inst){
                     Throw("Sub-sensor instance wasn't created successfully !!");
                 }
+                // Correct film size is needed for ray generation (no memory gets allocated)
                 inst->film()->set_size(sub_res);
                 inst->parameters_changed();
             }
@@ -213,6 +223,7 @@ public:
                 ScalarFloat dt = i / ScalarFloat(m_grid_size - 1);
                 ScalarVector3f offset   = m_cam_off + m_cam_dir * (m_cam_dist * (dt - 0.5f * m_cam_center));
                 auto itrafo = to_world.inverse_transpose;
+                // Shift to_world matrix
                 itrafo.entry(3,0) += offset.x();
                 itrafo.entry(3,1) += offset.y();
                 itrafo.entry(3,2) += offset.z();

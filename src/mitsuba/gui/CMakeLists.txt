@@ -25,4 +25,5 @@ target_include_directories(GUI INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui/misc/cpp
 )
+target_compile_options(imgui PRIVATE -O3)
 target_link_libraries(GUI INTERFACE SDL3::SDL3 imgui)

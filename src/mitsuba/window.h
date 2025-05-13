@@ -2,7 +2,9 @@
 /*---------------------------------------------------------------------------------------------*/
 /* Adaptive multiview path tracing; Bc. Ondrej Ac, FIT VUT Brno, 2025*/
 /*---------------------------------------------------------------------------------------------*/
-
+#ifndef  SDL_MAIN_HANDLED
+#define SDL_MAIN_HANDLED
+#endif
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <functional>

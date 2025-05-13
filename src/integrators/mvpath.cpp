@@ -18,7 +18,7 @@ MI_VARIANT typename MVPT::TensorXf MVPT::render(Scene *scene, Sensor *init_senso
     // Primary multisensor
     MultiSensor<Float, Spectrum> *sensor = dynamic_cast<MultiSensor<Float, Spectrum> *>(init_sensor);
     if (!sensor)
-        Throw("This integrator can only be used with MultiSensor !");
+        Throw("This integrator can only be used with MultiSensor instance !");
     // Get subsensors
     std::vector<Sensor *> sensors = sensor->sensors();
     uint32_t n_sensors            = sensors.size();
@@ -220,7 +220,7 @@ MI_VARIANT typename MVPT::TensorXf MVPT::render(Scene *scene, Sensor *init_senso
             Log(LogLevel::Warn,
                 "The number of sensors should be divisible by reused samples count! Setting %d instead.", sampleSize);
         }
-        
+
         std::unique_ptr<SampleData[]> sampleData(new SampleData[sampleSize]);
         Timer timer;
         // Potentially render multiple passes
@@ -236,7 +236,7 @@ MI_VARIANT typename MVPT::TensorXf MVPT::render(Scene *scene, Sensor *init_senso
             }
 
             if (reuse) {
-                render_multisample(scene, sensor, sampler_i, block, pos, sampleData.get(), sampleSize);
+                render_amvpt(scene, sensor, sampler_i, block, pos, sampleData.get(), sampleSize);
             } else {
                 render_sample(scene, sensor, sampler_i, block, pos);
             }
@@ -247,6 +247,7 @@ MI_VARIANT typename MVPT::TensorXf MVPT::render(Scene *scene, Sensor *init_senso
                     sampler_i->schedule_state();
                 }
                 dr::eval(block->tensor());
+                Log(Info, "Pass %d/%d Time: %.3f s\t\t\t\t", i + 1, n_passes, 0.001f * m_render_timer.value());
             }
         }
 

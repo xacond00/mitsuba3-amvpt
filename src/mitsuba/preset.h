@@ -12,6 +12,8 @@
 
 namespace mitsuba {
 
+
+/* Preset of  */    
 struct Preset {
     std::string name;
     float center, focus, pitch, tilt, subp;
@@ -20,25 +22,59 @@ struct Preset {
     bool flip_rgb;
     // Export a preset to an output stream (semicolon-separated format)
     friend std::ostream &operator<<(std::ostream &os, const Preset &p) {
-        os << p.name << ';' << p.center << ';' << p.focus << ';' << p.pitch << ';' << p.tilt << ';' << p.subp << ';'
+        os << p.name << ';' << p.focus << ';' << p.center << ';' << p.pitch << ';' << p.tilt << ';' << p.subp << ';'
            << p.view[0] << ';' << p.view[1] << ';' << p.grid[0] << ';' << p.grid[1] << ';' << p.flip_rgb << '\n';
         return os;
     }
-    operator std::string()const{
+
+    // Formatted for table use (not used)
+    std::vector<std::string> table_row() {
+        auto fmt_float = [](float value) -> std::string {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%.6g", (double)value); 
+            return std::string(buf);
+        };
+    
+        return {
+            name,
+            fmt_float(focus),
+            fmt_float(center),
+            fmt_float(pitch),
+            fmt_float(tilt),
+            fmt_float(subp),
+            fmt_float(view[0]),
+            fmt_float(view[1]),
+            std::to_string(grid[0]),
+            std::to_string(grid[1]),
+            std::to_string(flip_rgb)
+        };
+    }
+
+    // Table header (not used currently)
+    static std::vector<std::string> table_header() {
+        return { "name",    "foc",   "cent",  "pit",   "tilt",    "subp",
+                 "view0", "view1", "grid0", "grid1", "flrgb" };
+    }
+
+    static const char *line_header() {
+        return "name foc cent pit tilt subp vie0 vie1 gri0 gri1 flip";
+    }
+    
+    operator std::string() const {
         std::ostringstream ss;
         ss << *this;
         return ss.str();
     }
 
-    // Import a preset from an input stream
+    // Import a preset from an input stream (csv line)
     friend std::istream &operator>>(std::istream &is, Preset &p) {
         std::string line;
         if (std::getline(is, line)) {
             std::stringstream ss(line);
             std::getline(ss, p.name, ';');
-            ss >> p.center;
-            ss.ignore();
             ss >> p.focus;
+            ss.ignore();
+            ss >> p.center;
             ss.ignore();
             ss >> p.pitch;
             ss.ignore();
@@ -85,7 +121,7 @@ struct Preset {
         }
         return presets;
     }
-
+    
     static void update_list(const Preset &preset, std::vector<Preset> &presets) {
         for (auto &p : presets) {
             if (p.name == preset.name) {

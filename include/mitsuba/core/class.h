@@ -12,8 +12,11 @@ template <typename T> using ref = nanobind::ref<T>;
 NAMESPACE_BEGIN(mitsuba)
 NAMESPACE_BEGIN(xml)
 NAMESPACE_BEGIN(detail)
+
+/* Adaptive multiview path tracing; Bc. Ondrej Ac, FIT VUT Brno, 2025*/
 /// Find instance of a class based on name and variant
 const Class *find_class(const std::string &name, const std::string &variant);
+
 NAMESPACE_END(detail)
 NAMESPACE_END(xml)
 /**
