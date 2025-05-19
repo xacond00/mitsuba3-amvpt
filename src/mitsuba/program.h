@@ -19,6 +19,9 @@ public:
         m_view_res = vec2i(m_view.dims());
         load_image(m_image_path);
         Preset::merge_file(m_presets, "presets.csv");
+        fs::create_directory("output");
+        fs::create_directory("input");
+        fs::create_directory("scenes");
         // SDL_SetWindowAlwaysOnTop(m_menu.window(), true);
     }
     ~Program() {
@@ -64,7 +67,7 @@ private:
             }
             Log(Info, "Loaded image: %s", path);
             m_image_path  = path;
-            m_export_path = path.replace_extension("png");
+            m_export_path = "output/" + path.filename().replace_extension("png").string();
         } else
             Log(Warn, "Path doesn't exist !");
     }
@@ -74,7 +77,8 @@ private:
             Log(Warn, "Can't overwrite source image !");
         }
         auto path = fs::path(m_export_path);
-        if (fs::exists(path.parent_path())) {
+        if (fs::exists(path.parent_path()) || path.parent_path().empty()) {
+            m_image->write(path);
             Log(Info, "Image saved to: %s", path.replace_extension("png"));
         } else{
             Log(Warn, "Path doesn't exist !");
@@ -107,8 +111,8 @@ private:
     Window m_view;
     Window m_menu;
     SDL_Event event;
-    std::string m_image_path  = "../outputs/LKG48/1.exr";
-    std::string m_export_path = "../outputs/LKG48/1.png";
+    std::string m_image_path  = "input/1.exr";
+    std::string m_export_path = "output/1.png";
     vec2i m_view_res;
     uint32_t m_sel_pres = -1;
     int m_theme = 0;

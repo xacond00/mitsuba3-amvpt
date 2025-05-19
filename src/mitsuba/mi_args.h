@@ -14,7 +14,7 @@ namespace mitsuba {
 struct MiArgs {
     MiArgs(const std::string &prog_name = "mitsuba") : prog_name(prog_name) { update_args(); }
     std::string args    = "";
-    std::string scene   = "../scenes/bedroom/scene.xml";
+    std::string scene   = "scenes/bedroom/scene.xml";
     #if defined(MI_ENABLE_CUDA)
     std::string variant = "cuda_rgb";
     #elif defined(MI_ENABLE_LLVM)

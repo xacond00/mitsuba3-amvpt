@@ -274,6 +274,7 @@ void Program::display_image(bool screenshot) {
         std::tie(dst, dst_dim) = m_view.get_surf();
     }
     flip_rgb &= dst_ch > 2;
+    // Get raw data
     const uint8_t *src = m_image->uint8_data();
     uint32_t src_ch    = m_image->channel_count();
     vec2u src_dim(m_image->width(), m_image->height());
@@ -324,13 +325,14 @@ void Program::display_image(bool screenshot) {
             }
         }
     });
-
+    // Screenshot
     if (screenshot && img) {
         if (m_export_path == m_image_path) {
             Log(Warn, "Can't overwrite source image !");
         }
         auto path = fs::path(m_export_path);
-        if (fs::exists(path.parent_path())) {
+        if (fs::exists(path.parent_path()) || path.parent_path().empty()) {
+            img->write(path);
             Log(Info, "Image saved to: %s", path);
         } else {
             Log(Warn, "Path doesn't exist !");
