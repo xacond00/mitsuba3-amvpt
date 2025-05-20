@@ -66,7 +66,7 @@ private:
                 m_update_view = true;
             }
             Log(Info, "Loaded image: %s", path);
-            m_image_path  = path;
+            m_image_path  = path.string();
             m_export_path = "output/" + path.filename().replace_extension("png").string();
         } else
             Log(Warn, "Path doesn't exist !");

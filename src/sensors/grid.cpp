@@ -163,8 +163,14 @@ public:
         // Remove films and samplers from within nested sensor definition
         for (auto [name, o] : sub_props.objects()) {
             Wrap_t *wrap(dynamic_cast<Wrap_t *>(o.get()));
+            // MSVC Quirks
+            #ifdef _MSC_VER
+            auto *film(dynamic_cast<Film *>(o.get()));
+            auto *samp(dynamic_cast<Sampler *>(o.get()));
+            #else
             auto *film(dynamic_cast<Film<Float, Spectrum> *>(o.get()));
             auto *samp(dynamic_cast<Sampler<Float, Spectrum> *>(o.get()));
+            #endif
             if (wrap || film || samp) {
                 sub_props.remove_property(name);
             }
