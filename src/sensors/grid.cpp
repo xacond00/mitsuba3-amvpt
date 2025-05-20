@@ -197,9 +197,10 @@ public:
                 // The transform is actually inverse world = view^-1
                 auto itrafo = to_world.inverse_transpose;
                 // Either way shift the view matrix in the correct direction
-                itrafo.entry(3,0) += offset + m_cam_off.x();
-                itrafo.entry(3,1) += m_cam_off.y();
-                itrafo.entry(3,2) += m_cam_off.z();
+                // += operator isn't available in MSVC :(
+                itrafo.entry(3,0) = itrafo.entry(3,0) + offset + m_cam_off.x();
+                itrafo.entry(3,1) = itrafo.entry(3,1) + m_cam_off.y();
+                itrafo.entry(3,2) = itrafo.entry(3,2) + m_cam_off.z();
                 auto ntrafo = dr::inverse(dr::transpose(itrafo));
                 ScalarTransform4f trafo(ntrafo, itrafo);
                 //trafo.inverse_transpose = dr::inverse_transpose(trafo.matrix);
@@ -224,9 +225,9 @@ public:
                 ScalarVector3f offset   = m_cam_off + m_cam_dir * (m_cam_dist * (dt - 0.5f * m_cam_center));
                 auto itrafo = to_world.inverse_transpose;
                 // Shift to_world matrix
-                itrafo.entry(3,0) += offset.x();
-                itrafo.entry(3,1) += offset.y();
-                itrafo.entry(3,2) += offset.z();
+                itrafo.entry(3,0) = itrafo.entry(3,0) + offset.x();
+                itrafo.entry(3,1) = itrafo.entry(3,1) + offset.y();
+                itrafo.entry(3,2) = itrafo.entry(3,2) + offset.z();
                 auto ntrafo = dr::inverse(dr::transpose(itrafo));
                 ScalarTransform4f trafo(ntrafo, itrafo);
                 sub_props.set_transform("to_world", trafo, false);

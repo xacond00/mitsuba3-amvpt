@@ -4,14 +4,13 @@
 /*---------------------------------------------------------------------------------------------*/
 
 // This being a header, is a 'hack' to get around the plugin system being limited to single source file per plugin
-#include "dr_macros.h"
 #include "mvpath.h"
 
 NAMESPACE_BEGIN(mitsuba)
 
-MI_VARIANT void MVPT::render_amvpt(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor,
-                                         Sampler *sampler, ImageBlock *block, const Vector2f &pos,
-                                         SampleData *sampleData, uint32_t n_samples, Mask active) const {
+MI_VARIANT void MVPT::render_amvpt(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
+                                   ImageBlock *block, const Vector2f &pos, SampleData *sampleData, uint32_t n_samples,
+                                   Mask active) const {
     const Film *film      = sensor->film();
     ScalarVector2f scale  = 1.f / ScalarVector2f(film->crop_size()),
                    offset = -ScalarVector2f(film->crop_offset()) * scale;
@@ -24,7 +23,7 @@ MI_VARIANT void MVPT::render_amvpt(const Scene *scene, const MultiSensor<Float, 
         aperture_sample = sampler->next_2d(active);
     Float time = sensor->shutter_open();
     if (sensor->shutter_open_time() > 0.f)
-        time += sampler->next_1d(active) * sensor->shutter_open_time();
+        time = dr::fmadd(sampler->next_1d(active), sensor->shutter_open_time(), time);
 
     Float wavelength_sample = 0.f;
     if constexpr (is_spectral_v<Spectrum>)
@@ -35,7 +34,7 @@ MI_VARIANT void MVPT::render_amvpt(const Scene *scene, const MultiSensor<Float, 
     // Compute max camera index in each group
     UInt32 max_idx = n_samples * (dr::idiv(p_idx, n_samples) + 1U);
     // Create a sequence of sample data (1 SampleData for each camera in group)
-    for (uint i = 0; i < n_samples; i++) {
+    for (uint32_t i = 0; i < n_samples; i++) {
         UInt32 idx    = p_idx + i;
         sampleData[i] = dr::zeros<SampleData>();
         // Camera indices for given sample in agroup
@@ -71,14 +70,14 @@ MI_VARIANT void MVPT::render_amvpt(const Scene *scene, const MultiSensor<Float, 
             continue;
         if (i > 0) { // Compute individual view offsets on film
             auto [y, x] = dr::idivmod(sample.idx, grid[0]);
-            // Handle reversed grid axes
-             // The if is deliberate here, 
-             // since we can skip vector computation
+            // Handle reversed grid axes.
+            // The if is deliberate here, since we 
+            // can skip vector computation if false.
             if (rev_x)
                 x = (grid[0] - 1) - x;
             if (rev_y)
                 y = (grid[1] - 1) - y;
-            sample.pos += Vector2u(x, y) * sub_res;
+            sample.pos = dr::fmadd(Vector2u(x, y), sub_res, sample.pos);
             block->set_coalesce(false); // We are writing to random positions
         }
         // Accumulate to film
@@ -151,7 +150,7 @@ MVPT::sample_mvpt(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor
     // Find prefix (primary hit point)
     SurfaceInteraction3f si = scene->ray_intersect(p_ray, +RayFlags::All, true);
     Bool p_hit              = si.is_valid();
-    
+
     // ---------------------- Surface emission ---------------------------------------------------------
     // -------------------------------------------------------------------------------------------------
     Mask direct_em = si.emitter(scene) != nullptr;
@@ -214,7 +213,7 @@ MVPT::sample_mvpt(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor
     Bool p_not_delta = not_delta && p_hit;
     // Initial mask for reusing samples
     Bool reuse = !direct_em && p_not_delta && bsdf_smooth;
-    // In order to reuse a sample in the first place, it has to be on a surface, 
+    // In order to reuse a sample in the first place, it has to be on a surface,
     // the bsdf has to be partially smooth, and the brdf must not be delta nor null
     bool should_reuse = n_samples > 1 && dr::any_or<true>(reuse);
     bool should_mis   = m_sa_mis && should_reuse;
@@ -236,8 +235,8 @@ MVPT::sample_mvpt(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor
         bsdf_data.bsdf    = bsdf;
         p_sample.bsdf_val = bsdf_val;
         // Select suitable cameras (modifies bsdf_sample and direct_pdf)
-        select_views(scene, sensor, sampler, samples, n_samples, si, si_k, bsdf_data, wo, p_app, rand_2, rand_1,
-                         p_hit, bsdf_sample, direct_pdf);
+        select_views(scene, sensor, sampler, samples, n_samples, si, si_k, bsdf_data, wo, p_app, rand_2, rand_1, p_hit,
+                     bsdf_sample, direct_pdf);
         // Weight the selected cameras
         mis_weights(samples, n_samples, si_k, bsdf_data);
 
@@ -308,7 +307,7 @@ MVPT::sample_mvpt(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor
             sample_k.indirect &= valid;
         }
         // Mixture pdf -> average when not delta, otherwise primary delta pdf
-        bsdf_sample.pdf = dr::select(p_not_delta, pdf / n_indir, bsdf_sample.pdf);
+        bsdf_sample.pdf     = dr::select(p_not_delta, pdf / n_indir, bsdf_sample.pdf);
         samples[0].bsdf_val = dr::select(p_not_delta, samples[0].bsdf_val, bsdf_weight);
         // Set adaptive mask based on number of collected samples (just primary)
         adapt_mask = p_hit && !flag_null && (n_indir <= 1.f);
@@ -378,10 +377,10 @@ MVPT::sample_mvpt(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor
 }
 
 MI_VARIANT void MVPT::select_views(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
-                                       SampleData *samples, uint n_samples, const SurfaceInteraction3f &si,
-                                       SurfaceInteraction3f &si_k, const BSDFData &bsdf, const Vector3f &wo,
-                                       const Point2f &p_app, const Point2f &rand_2, const Float &rand_1,
-                                       const Bool &p_hit, BSDFSample3f &bsdf_sample, Float &direct_pdf) const {
+                                   SampleData *samples, uint32_t n_samples, const SurfaceInteraction3f &si,
+                                   SurfaceInteraction3f &si_k, const BSDFData &bsdf, const Vector3f &wo,
+                                   const Point2f &p_app, const Point2f &rand_2, const Float &rand_1, const Bool &p_hit,
+                                   BSDFSample3f &bsdf_sample, Float &direct_pdf) const {
 
     static BSDFContext bsdf_ctx = BSDFContext(); // BSDF contexts for choosing sampling methods
     static BSDFContext glossy_ctx(TransportMode::Radiance, (uint32_t) BSDFFlags::Glossy);
@@ -419,7 +418,7 @@ MI_VARIANT void MVPT::select_views(const Scene *scene, const MultiSensor<Float, 
         sample_k.pdfM = m_fast_mis ? dr::square(Frame3f::cos_theta(dr::normalize(si_k.wi + sample_k.wr)))
                                    : bsdf.bsdf->pdf(glossy_ctx, si_k, sample_k.wr, valid);
         // Material selection pdf based on primary and secondary sample
-        Float pdf_Mat = tv_pdf(p_sample.wr, si_k, sample_k.pdfM, bsdf, valid, m_fast_mis);
+        Float pdf_Mat                     = tv_pdf(p_sample.wr, si_k, sample_k.pdfM, bsdf, valid, m_fast_mis);
         dr::masked(pdf_Mat, bsdf.diffuse) = 1.f;
         // Jacobian and its propability
         Float J     = Jp * p_sample.iJp;
@@ -471,7 +470,7 @@ MI_VARIANT void MVPT::select_views(const Scene *scene, const MultiSensor<Float, 
     direct_pdf /= n_direct;
 }
 
-MI_VARIANT void MVPT::mis_weights(SampleData *samples, uint n_sensors, SurfaceInteraction3f &si_k,
+MI_VARIANT void MVPT::mis_weights(SampleData *samples, uint32_t n_sensors, SurfaceInteraction3f &si_k,
                                   const BSDFData &bsdf_data) const {
     // Loop over all cameras/samples
     for (uint32_t k = 0; k < n_sensors; k++) {
@@ -489,42 +488,48 @@ MI_VARIANT void MVPT::mis_weights(SampleData *samples, uint n_sensors, SurfaceIn
         // Use dr::is_stmt to potentially skip the inner loop on some threads.
         // Run first condition if sample IS valid and NOT diffuse
         // Run second condition if sample is either NOT valid or IS diffuse
-        pdfSum += DR_IF(cond && !bsdf_data.diffuse, (m_fast_mis, si_k, samples, n_sensors, k, bsdf_data, cond), ({
-                            Float pdfSum         = 0.f;
-                            const auto &sample_k = samples[k];
-                            //  Sum propability of all pdf j to k
-                            //  We are avoiding masking as much as possible in the nested
-                            //  loops (ie the pdfs are already set to 0 before)
-                            for (uint32_t j = 1; j < n_sensors; j++) {
-                                const auto &sample_j = samples[j];
-                                // Valid = selection + visibility
-                                const Bool &valid = sample_j.valid;
-                                // Skip known/invalid samples
-                                if (j == k || dr::none_or<false>(valid)) {
-                                    continue;
-                                }
-                                //  Optimized J(j->k) * pdf(J(j->k)) is just min(J^2, 1)
-                                Float pdf_J   = dr::minimum(dr::square(sample_j.Jp * sample_k.iJp), 1.f);
-                                Float pdf_Mat = tv_pdf(sample_j.wr, si_k, sample_k.pdfM, bsdf_data, valid, m_fast_mis);
-                                //  p(j) * J(j->k) * V(k) * p(J(j->k)) * p(M(j->k))
-                                pdfSum = dr::fmadd(sample_j.pdf, pdf_J * pdf_Mat, pdfSum);
-                            }
-                            return pdfSum;
-                        }),
-                        ({
-                            Float pdfSum         = 0.f;
-                            const auto &sample_k = samples[k];
-                            for (uint32_t j = 1; j < n_sensors; j++) {
-                                const auto &sample_j = samples[j];
-                                if (j == k || dr::none_or<false>(sample_j.valid)) {
-                                    continue;
-                                }
-                                Float pdf_J = dr::minimum(dr::square(sample_j.Jp * sample_k.iJp), 1.f);
-                                pdfSum      = dr::fmadd(sample_j.pdf, pdf_J, pdfSum);
-                            }
-                            return dr::select(cond, pdfSum, 0.f);
-                        }));
-
+        // Makes the default MVPT (without fast MIS) about 1.5x faster during compile 
+        pdfSum = pdfSum + dr::if_stmt(
+                              dr::make_tuple(si_k, samples, n_sensors, k, bsdf_data, cond, m_fast_mis),
+                              cond && !bsdf_data.diffuse,
+                              [](const SurfaceInteraction3f &si_k, SampleData *samples, uint32_t n_sensors, uint32_t k,
+                                 const BSDFData &bsdf_data, const Mask &, bool fast_mis) {
+                                  Float pdfSum         = 0.f;
+                                  const auto &sample_k = samples[k];
+                                  //  Sum propability of all pdf j to k
+                                  //  We are avoiding masking as much as possible in the nested
+                                  //  loops (ie the pdfs are already set to 0 before)
+                                  for (uint32_t j = 1; j < n_sensors; j++) {
+                                      const auto &sample_j = samples[j];
+                                      // Valid = selection + visibility
+                                      const Bool &valid = sample_j.valid;
+                                      // Skip known/invalid samples
+                                      if (j == k || dr::none_or<false>(valid)) {
+                                          continue;
+                                      }
+                                      //  Optimized J(j->k) * pdf(J(j->k)) is just min(J^2, 1)
+                                      Float pdf_J = dr::minimum(dr::square(sample_j.Jp * sample_k.iJp), 1.f);
+                                      Float pdf_Mat =
+                                          tv_pdf(sample_j.wr, si_k, sample_k.pdfM, bsdf_data, valid, fast_mis);
+                                      //  p(j) * J(j->k) * V(k) * p(J(j->k)) * p(M(j->k))
+                                      pdfSum = dr::fmadd(sample_j.pdf, pdf_J * pdf_Mat, pdfSum);
+                                  }
+                                  return pdfSum;
+                              },
+                              [](const SurfaceInteraction3f &, SampleData *samples, uint32_t n_sensors, uint32_t k,
+                                 const BSDFData &, const Mask &cond, bool) {
+                                  Float pdfSum         = 0.f;
+                                  const auto &sample_k = samples[k];
+                                  for (uint32_t j = 1; j < n_sensors; j++) {
+                                      const auto &sample_j = samples[j];
+                                      if (j == k || dr::none_or<false>(sample_j.valid)) {
+                                          continue;
+                                      }
+                                      Float pdf_J = dr::minimum(dr::square(sample_j.Jp * sample_k.iJp), 1.f);
+                                      pdfSum      = dr::fmadd(sample_j.pdf, pdf_J, pdfSum);
+                                  }
+                                  return dr::select(cond, pdfSum, 0.f);
+                              });
         sample_k.weight = sample_k.pdf_lk / pdfSum;
     }
 }

@@ -157,7 +157,7 @@ void Program::imgui_menu() {
             Preset::merge_file(m_presets, "presets.csv");
         }
         Text("%s", Preset::line_header());
-        float height = ImGui::GetTextLineHeightWithSpacing() * std::min(m_presets.size(), 10UL);
+        float height = ImGui::GetTextLineHeightWithSpacing() * std::min(m_presets.size(), size_t(10UL));
         if (ImGui::BeginListBox("##Preset list", ImVec2(-1, height))) {
             for (uint32_t i = 0; i < m_presets.size(); i++) {
                 std::string name = std::string(m_presets[i]);
@@ -287,7 +287,7 @@ void Program::display_image(bool screenshot) {
 
     uint32_t threads = std::thread::hardware_concurrency();
     threads          = threads > 0 ? threads : 4;
-    uint block_size  = std::max(dst_dim[1] / threads, 1U);
+    uint32_t block_size  = std::max(dst_dim[1] / threads, 1U);
     
     // Interlacing algorithm inspired by: https://git.fit.vutbr.cz/imilet/FitGraphics/src/branch/master/src/LKG/
     // Parallel CPU for loop, needs scalar JIT instance to be running

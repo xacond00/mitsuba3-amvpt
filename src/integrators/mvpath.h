@@ -103,15 +103,16 @@ and singular BSDF pdf of reflection in non-MIS case.
         :name: mvpath
     <integrator type="mvpath">
 		<integer name="spp_pass_lim" value="32"/>
-		<integer name="max_depth" value="20" />
+		<integer name="max_depth" value="20"/>
 		<boolean name="sa_reuse" value="true" />
-		<integer name="reuse_count" value="16" />
 		<boolean name="sa_mis" value="true" />
-		<boolean name="force_eval" value="true" />
 		<boolean name="fast_mis" value="true" />
-		<integer name="adaptive" value="0" />
+		<integer name="adaptive" value="3" />
+		<integer name="reuse_count" value="8" />
+		<boolean name="force_eval" value="true" />
 		<boolean name="debug" value="false" />
 	</integrator>
+
 
  */
 
@@ -196,7 +197,7 @@ public:
     /**
      * \brief Compute MIS weights between multiple selected cameras
      */
-    void mis_weights(SampleData *samples, uint n_samples, SurfaceInteraction3f &si_k, const BSDFData &bsdf_data) const;
+    void mis_weights(SampleData *samples, uint32_t n_samples, SurfaceInteraction3f &si_k, const BSDFData &bsdf_data) const;
 
     /**
      * \brief Select reusable cameras based on material and jacobian propabilities. Fills in sample data accordingly.
@@ -210,7 +211,7 @@ public:
      * \return Nothing, as &bsdf_sample and &direct_pdf are modified directly
      */
     void select_views(const Scene *scene, const MultiSensor<Float, Spectrum> *sensor, Sampler *sampler,
-                          SampleData *samples, uint n_samples, const SurfaceInteraction3f &si,
+                          SampleData *samples, uint32_t n_samples, const SurfaceInteraction3f &si,
                           SurfaceInteraction3f &si_k, const BSDFData &bsdf, const Vector3f &wo, const Point2f &p_app,
                           const Point2f &rand_2, const Float &rand_1, const Bool &p_hit, BSDFSample3f &bsdf_sample,
                           Float &direct_pdf) const;
