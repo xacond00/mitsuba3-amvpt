@@ -4,9 +4,9 @@
 alt="Mitsuba banner">
 
 # Mitsuba Renderer 3 - Unofficial AMVPT Extension
-## Diplomová práce
+### Diplomová práce
 ### Bc. Ondřej Áč (xacond00)
-Compilation and execution guide:
+## Compilation and execution guide  
 ```shell
 mkdir build && cd build
 cmake [-GNinja] .. # Ninja generator is recommended
@@ -23,9 +23,13 @@ If your gpu doesn't support CUDA, delete `cuda_rgb`.
 ./mitsuba # Run GUI
 ./mitsuba -m [cuda_rgb|llvm_rgb] ../xxx/xxx/scene.xml # Render a specific scene
 ```
-For detailed instructions see documentation. 
+For detailed instructions see Mitsuba documentation. 
 
-# Credits:
+## Modified contents
+- `src/` own plugin implementation inside folders: `integrators/`, `wrappers/`, `sensors/`. Folder `mitsuba/` contains source code of created GUI interface.
+- `include/mitsuba/render/` modified/added: `bsdf.h`, `sensor.h`, `wrap.h` and their `.cpp` counterparts in `src/` 
+
+## Credits:
 ```bibtex
 @software{Mitsuba3,
     title = {Mitsuba 3 renderer},
